@@ -145,11 +145,32 @@ end to end.
 cd windows && ./gradlew :app:run :core:test
 ```
 
-- [ ] **Phase 1 — headless poller.** `WindowsConfigDir` (native path, WSL distro
-      enumeration, `looksValid`), the file-based credential bridge with the
-      three-state lookup, `wsl.exe -l --running -q` gating, the token cache, and
-      the poll loop against `UsageApi`. No UI. All the platform risk lives here,
-      which is why it goes first.
+**Phase 1 — headless poller. Done; verified on a Linux JVM, not yet on Windows.**
+`ClaudeConfigDir` (native path, running-distro enumeration, `looksValid`,
+identity), `CredentialBridge` with the three-state lookup, `TokenCache`, and
+`UsagePoller`. 28 tests. Run end to end against a live credential and the real
+API:
+
+```
+gradlew :app:run                        # resolve, report, poll once
+gradlew :app:run --args="--watch"       # keep polling
+gradlew :app:run --args="--dir <path>"  # an explicit directory
+```
+
+The `--dir` override is the headless stand-in for the macOS folder picker, and
+the only way to exercise any of this on a machine that is not Windows.
+
+Two things it settled that were not obvious:
+
+**`wsl.exe` speaks two encodings.** Its own listings are UTF-16LE; when it is
+merely launching a Linux program, the bytes are that program's, and they are
+UTF-8. `WslCommand` splits `run` from `exec` for exactly this reason — decoding
+`whoami` as UTF-16LE yields a username matching nobody, silently.
+
+**The poller must never call `UsageApi.fetchUsage`.** That method refreshes a
+token close to expiry, and refreshing is the one thing a bridged client must not
+do. `UsagePoller` calls `requestUsage` only; when a token goes stale the answer
+is to re-read Claude Code's file, never to rotate its chain.
 - [ ] **Phase 2 — tray and flyout.** A *drawn* tray bitmap: Windows has no text
       in the notification area, so the macOS "percentage + time" display modes
       become icon variants rendered at 16/20/24 px, DPI-aware, redrawn per poll.
@@ -172,8 +193,15 @@ easier; deferring it is part of what keeps Compose Desktop the right call.
 
 ## Unverified
 
-Written down rather than discovered later. None of it is load-bearing for
-Phase 0:
+Written down rather than discovered later:
+
+- **None of this has run on Windows.** Phases 0 and 1 were built and verified on
+  a Linux JVM against a local `--dir`. That exercises the parsing, the gating
+  logic and the API path, and it exercises *none* of what makes this a Windows
+  port: `%USERPROFILE%` resolution, UNC path spelling, whether a `\\wsl.localhost`
+  read behaves as expected, or `RealWslCommand` against a real `wsl.exe`. The
+  seams are all injected, so this is a question of integration rather than of
+  design — but it is unanswered.
 
 - **Compose Multiplatform 1.12.0 against Kotlin 2.4.10.** Both are the newest
   stable of each, resolved from live Maven metadata; their mutual compatibility

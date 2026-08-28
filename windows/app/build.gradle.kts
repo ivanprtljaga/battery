@@ -22,8 +22,21 @@ java {
 dependencies {
     // The Android module, borrowed in place. See settings.gradle.kts.
     implementation(project(":core"))
+
+    // `core` keeps this as `implementation`, so it is not on our compile
+    // classpath transitively — declared here for the config and credential
+    // parsing. Same runtime-only usage as core: no @Serializable types, no
+    // compiler plugin.
+    implementation(libs.kotlinx.serialization.json)
+
+    testImplementation(kotlin("test"))
 }
 
 application {
-    mainClass.set("com.allthingsclaude.battery.windows.SmokeKt")
+    mainClass.set("com.allthingsclaude.battery.windows.MainKt")
+}
+
+tasks.test {
+    useJUnitPlatform()
+    testLogging { events("failed") }
 }
