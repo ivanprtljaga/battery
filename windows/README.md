@@ -589,8 +589,101 @@ gradlew :app:run --args="--toast"    # one sample alert, through the real path
 
 ---
 
-- [ ] **Phase 5 — ship.** `windows-release.yml` on `windows-latest`, jpackage
-      MSI, `ReleaseFeed` reused unchanged for in-app updates, winget manifest.
+**Phase 5 — ship. Built and installed; not yet released.** `gradlew :app:packageMsi`
+produces a 72 MB per-user installer that has been installed, run and uninstalled
+on a real machine. `windows-release.yml` and the winget manifests are written and
+have never run — there is no `windows-v*` tag yet.
+
+```
+gradlew :app:packageMsi          # app/build/compose/binaries/main/msi/
+gradlew :app:createDistributable # the app image, no installer, no WiX
+```
+
+**No WiX to install, and no administrator.** jpackage builds an MSI by driving
+WiX, which is why this phase started by asking permission to install it — a
+request built on a wrong premise. The Compose Gradle plugin downloads WiX 3.11.2
+into `windows/build/wix311/` and hands jpackage that copy. The installer built on
+a machine with no WiX, no .NET 3.5 feature enabled, and no elevation, which also
+means anyone who clones this repository can build it.
+
+**The toast's name was never an AppUserModelID problem.** Phase 4 left this open
+and guessed wrong twice: that a Start Menu shortcut would fix it, and that
+`SetCurrentProcessExplicitAppUserModelID` was worth calling at all. Measured
+three ways on a real install:
+
+| | header shown |
+|:--|:--|
+| unpackaged `java.exe` | `OpenJDK Platform binary` |
+| any build, with an explicit AppUserModelID | `com.allthingsclaude.battery`, the raw string |
+| the packaged exe, no explicit ID | the app's own name and icon |
+
+Windows reads the attribution from the executable's `FileDescription` version
+resource, which jpackage writes from `nativeDistributions.description`. An
+explicit AppUserModelID *overrides* that with an identifier no Start Menu entry
+resolves, so the Phase 4 code made the packaged build worse. A Start Menu
+shortcut turned out not to be involved either way — attribution is correct with
+none installed. `Toaster` lost its only native call, and `description` is now
+load-bearing: it is the name in the notification centre, which is why it reads
+"Battery for Claude Code" and not something longer.
+
+**`jdk.localedata` is the module it is easy to leave out and wrong to.** Trimming
+the bundled runtime is most of why the installer is 72 MB rather than 200. Since
+Java 9 `java.base` carries only root and English locale data and everything else
+lives in `jdk.localedata`, so omitting it renders every non-English user's dates
+in English — and *only in the packaged build*, which is the build nobody runs
+while developing. Caught by rendering the panel from the installed exe and seeing
+`Wed 7:00 PM` where the machine's own clock said 18:59. With the module present
+the same panel reads `sre 22:31`, which is what that machine's regional format
+actually is.
+
+### Saying when, not how long
+
+The reset caption under each gauge read `123h 47m` for a weekly window, and had
+since Phase 2. Nobody converts that into a plan. `core`'s `TimeFormatting.untilReset`
+exists because the same defect appeared on Apple as `153h 0m` — it renders `5d 3h`,
+readable but still arithmetic.
+
+Past a day this now says *when*: `Wed 19:00`. Below a day it stays a countdown
+and defers to `TimeFormatting.shortDuration`, which is pinned across all four
+platforms by `fixtures/time-formatting.json` — a five-hour session is a duration
+question and `4h 37m` is the answer. `TimeFormatting` refuses absolute times for
+a good reason, that a shared fixture-pinned formatter cannot carry a zone or a
+locale; a desktop panel has both, so the branch lives here.
+
+The locale it has both *from* is `Locale.Category.FORMAT`, not `Locale.getDefault()`.
+Windows keeps the display language and the regional format apart and the JVM
+mirrors the split: on the development machine they are `en_US` and `sr_RS_#Latn`,
+so the plain default renders `7:00 PM` beside a taskbar clock reading 19:00.
+
+**`ReleaseFeed` could not be reused unchanged.** The plan said it would be. Four
+things stop it: `TAG_PREFIX` is `"android-v"`, the User-Agent is
+`"Battery-Android"`, and `PER_PAGE` and `MAX_PAGES` are `internal` to the module.
+The first two are closed over by `findNewer` and `newestOnPage`, so pointing this
+app at them would offer a Windows user an APK. Parameterising the prefix is the
+right change and it belongs **upstream**: `core` is the Android tree's module
+borrowed in place, and editing it from here would diverge the very thing this
+build exists to share.
+
+So `WindowsRelease` is the page loop written once more with a different constant,
+and nothing else. Everything that can actually be wrong is still `core`'s —
+`compareVersions`, `itemCount`, the four-way `Check`, `shouldAnnounce`. The
+duplication is about sixty lines and it is visible, which is the honest form for
+a thing waiting on an upstream change.
+
+**Two smaller things a packaging run settled.** The `application` plugin and
+`compose.desktop.application` both register a `run` task and collide, so the
+former is gone and the main class and console encoding moved into the compose
+block. And the version is generated into `BuildInfo` rather than written twice:
+`UsagePoller.VERSION` carried a literal with a note saying this phase would
+replace it, and the MSI's ProductVersion would otherwise have been a second place
+to remember. `releaseRepo` is generated the same way and for the reason
+`android-release.yml` already documents — a fork that polls upstream reports
+"up to date" for ever, which looks exactly like an updater that works.
+
+The install itself, verified end to end: `%LOCALAPPDATA%\Battery`, a Start Menu
+group, no administrator prompt, and an uninstall that leaves neither the
+directory nor the shortcut behind.
+
 
 The Windows 11 Widgets board — the analogue of the Glance widgets and the iOS
 Home Screen widgets — is deliberately **not** in this list. It needs MSIX and a
@@ -601,10 +694,16 @@ easier; deferring it is part of what keeps Compose Desktop the right call.
 
 Written down rather than discovered later:
 
-- **The toast's display name and icon.** Setting the AppUserModelID gets the
-  JDK's branding off, and no further: a name and an icon need a Start Menu
-  shortcut carrying the same ID, which jpackage writes in Phase 5. Until then
-  the toast is headed `com.allthingsclaude.battery`, which is honest and ugly.
+- **`windows-release.yml` has never run.** No `windows-v*` tag exists, so the
+  workflow is reasoned from `android-release.yml` and from a packaging run on one
+  machine. The steps most likely to be wrong are the ones a local build cannot
+  exercise: whether `windows-latest` resolves the borrowed `core` from a clean
+  checkout, and whether the MSI lands where `Collect artifact` looks for it.
+- **The winget manifests have never been submitted.** They are templates with a
+  version and a hash to fill in; the first submission is also the first review.
+- **The updater has never seen a real release.** `WindowsRelease` is tested
+  against fixture pages, which pins the paging and the four-way answer, and says
+  nothing about what GitHub actually returns for this repository's feed.
 - **Whether DWM actually honours the rounded corner.** Setting
   `DWMWA_WINDOW_CORNER_PREFERENCE` to `DWMWCP_ROUND` returns `S_OK` and reads
   back as `ROUND` on the development machine, and the compositor still draws the
@@ -617,9 +716,11 @@ Written down rather than discovered later:
   of anyone. 100% is the interesting one: it is the case where the tray icon
   drops to a bare 16 px ring.
 - **A taskbar anywhere but the bottom.** `TrayAnchor` handles a top or side
-  taskbar and the geometry is tested, but the tested part is the arithmetic —
-  what `Shell_NotifyIconGetRect` returns for a vertical taskbar, and for an icon
-  sitting inside an *open* overflow flyout, has not been seen.
+  taskbar and the geometry is tested, but the tested part is the arithmetic; what
+  `Shell_NotifyIconGetRect` returns for a *vertical* taskbar has not been seen.
+  The overflow case has: with the icon inside an open overflow flyout the call
+  returned its position there and the panel centred on it to the pixel, which is
+  the case a corner guess could never have handled.
 - **A second monitor at a different scale factor.** `TrayAnchor` picks the
   screen by asking each device to read the icon rectangle with its own scale
   factor, which is exact for a monitor whose desktop origin is the origin — so
