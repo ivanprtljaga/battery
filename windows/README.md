@@ -95,6 +95,43 @@ carries far more weight here. Only the wording changes — not "credential
 unreadable" but "Ubuntu isn't running", which is a fact about the user's machine
 rather than an error about Battery's.
 
+## Two installs, one tray
+
+The same duality has a second consequence, and it only shows up once *both*
+sides work. A machine with WSL routinely carries two Claude Code installs, the
+same account signed in on each, each holding a live credential:
+
+```
+Windows: C:\Users\Ivan\.claude            token valid for 6h 59m
+WSL: Ubuntu: \\wsl.localhost\Ubuntu\...   token valid for 5h 12m
+```
+
+[`DirSelection`] settles which directory to use when only one *can* answer. It
+has nothing to say when both can, so the tie falls through to
+`ClaudeConfigDir.candidates()`'s ordering — which is by **cost**, native first,
+because that path needs no distro probe. The app therefore reads the native
+install, silently, on the machine of someone who runs Claude Code in WSL.
+
+That is not a cosmetic preference. The two report different five-hour windows —
+8% with 4h 29m left on one, 14% with 3h 42m on the other — because they are
+different sessions. Guessing is visibly wrong rather than merely arbitrary, and
+no fact available to the app decides it. So it is a setting: a `Source` submenu
+in the tray listing what `candidates()` found, ticked against the live one, and
+`SourcePreference` remembering the answer across launches.
+
+**The preference stores the origin, not just the path**, and that is the whole
+point of the file format. A bare `\\wsl.localhost\...` path replayed on the next
+launch would be a `DirOrigin.EXPLICIT` directory — and an explicit directory is
+deliberately *not* distro-gated, because naming one is a claim that you can
+already reach it. Pinning a distro that way would mean touching a
+`\\wsl.localhost` path on every launch, which starts the distro. Restoring the
+origin keeps `CredentialBridge`'s gate, so a pinned distro that is shut down
+says "Ubuntu isn't running" for free.
+
+A pin also outranks the candidate list when it is *absent* from it. Falling back
+to the other install would answer with a different session window under a label
+the user did not choose, which is worse than saying nothing.
+
 ## What Windows-native Claude Code does
 
 Probed on a real install rather than assumed, the way `ClaudeConfigDir` pins
@@ -277,7 +314,7 @@ do. `UsagePoller` calls `requestUsage` only; when a token goes stale the answer
 is to re-read Claude Code's file, never to rotate its chain.
 **Phase 2 — tray and flyout. Done, and now verified in a real notification
 area.** Compose Multiplatform 1.12.0 against Kotlin 2.4.10, confirmed building
-and running rather than assumed. 47 tests in `:app`, alongside `core`'s 118.
+and running rather than assumed. 63 tests in `:app`, alongside `core`'s 118.
 
 ```
 gradlew :app:run                                     # tray icon; click for the panel
@@ -352,6 +389,22 @@ to anyone who clicked it the way Windows taught them — and a tray app whose ic
 does nothing is indistinguishable from a tray app that has crashed. There is no
 Compose hook, so the listener goes onto the AWT icon directly, reached through
 `SystemTray.trayIcons`.
+
+**The poll loop ignored `core`'s backoff.** `PollBackoff` has been in the shared
+module since it was ported from `UsagePollingService.swift` — escalating 60s to
+600s, honouring `Retry-After`, tested. Nothing on Windows asked it anything: the
+loop delayed a flat sixty seconds whatever came back, so a 429 was answered
+exactly sixty seconds later, for ever, which is not how you stop being rate
+limited. The fix is that the loop sleeps for what `AppState` says rather than for
+a constant. Worth recording as a failure mode rather than a typo — the port had
+the answer in the module it borrows and reimplemented the cadence beside it.
+
+**AWT menus have no radio item.** `MenuScope.RadioButtonItem` compiles and then
+throws `java.awt.Menu doesn't support RadioButtonItem` when the menu is built,
+because AWT's menus are made of `CheckboxMenuItem` and nothing else. The Source
+group is a tick rather than a bullet, which is what the platform can draw. It is
+also the one thing here no test could have caught: it fails inside the tray's
+composition, at the moment a real menu opens.
 
 **The rounded corner was four white wedges.** The panel rounded itself with a
 `clip(RoundedCornerShape(12.dp))` inside an opaque square window, and a clip
