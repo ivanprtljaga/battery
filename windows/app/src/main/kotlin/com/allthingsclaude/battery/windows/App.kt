@@ -73,11 +73,6 @@ fun main(args: Array<String>) {
     // WSLg during development. Falling back to a plain visible window keeps the
     // app usable and, more to the point, keeps the panel reviewable somewhere
     // other than Windows.
-    // Before the first toast: a notification is attributed to its process's
-    // AppUserModelID, and an unregistered java.exe has the JDK's. Without this
-    // the app announces itself as "OpenJDK Platform binary".
-    Toaster.claimIdentity()
-
     val trayAvailable = runCatching { SystemTray.isSupported() }.getOrDefault(false)
     val startVisible = args.contains("--panel") || !trayAvailable || claimFirstRun()
 

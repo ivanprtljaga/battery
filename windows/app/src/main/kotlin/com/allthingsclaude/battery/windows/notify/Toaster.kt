@@ -1,8 +1,5 @@
 package com.allthingsclaude.battery.windows.notify
 
-import com.sun.jna.Native
-import com.sun.jna.WString
-import com.sun.jna.win32.StdCallLibrary
 import java.awt.SystemTray
 import java.awt.TrayIcon
 
@@ -17,38 +14,28 @@ import java.awt.TrayIcon
  * Windows routes `Shell_NotifyIcon`'s `NIF_INFO` into the modern notification
  * system, and AWT already speaks it. The whole delivery mechanism is one call.
  *
- * What *is* worth a native call is the name on it. The first test toast was
- * headed **"OpenJDK Platform binary"** with a coffee-cup icon, because a toast
- * is attributed to its process's AppUserModelID and an unregistered `java.exe`
- * has the JDK's. [claimIdentity] replaces it.
+ * **The name on it is a packaging property, not a runtime one.** The first test
+ * toast was headed "OpenJDK Platform binary" with a coffee-cup icon, and the
+ * obvious repair — `SetCurrentProcessExplicitAppUserModelID` — is the wrong one.
+ * Measured on a real install, three ways:
  *
- * That gets the branding off and not much more: with no Start Menu shortcut
- * carrying the same ID, Windows has no display name or icon to resolve and shows
- * the raw string — verified, `com.allthingsclaude.battery` in place of the JDK.
- * The rest is a packaging problem, not a notification one: jpackage's
- * `--win-menu` writes exactly that shortcut, so the friendly name and the
- * terracotta icon arrive with Phase 5 rather than with more Win32.
+ * | | header shown |
+ * |:--|:--|
+ * | unpackaged `java.exe` | `OpenJDK Platform binary` |
+ * | + an explicit AppUserModelID | `com.allthingsclaude.battery`, the raw string |
+ * | the packaged exe, no explicit ID | the app's name and its icon |
+ *
+ * Windows takes the attribution from the executable's `FileDescription` version
+ * resource, which jpackage writes from `nativeDistributions.description` — and
+ * an explicit AppUserModelID *overrides* that with an identifier no Start Menu
+ * entry resolves. Setting one made the packaged build worse, not better, and
+ * removing it is the whole fix. A Start Menu shortcut turned out not to be
+ * involved either way: the toast is attributed correctly with none installed.
+ *
+ * So there is no native code here at all, and the app's name in the notification
+ * centre is set in `build.gradle.kts`.
  */
 object Toaster {
-
-    /** Reverse-DNS, matching the bundle identifiers the other platforms use. */
-    const val APP_ID = "com.allthingsclaude.battery"
-
-    private interface Shell32 : StdCallLibrary {
-        fun SetCurrentProcessExplicitAppUserModelID(appId: WString): Int
-    }
-
-    /**
-     * Tell Windows who this process is, before the first toast.
-     *
-     * Idempotent from the caller's side and safe to fail: a toast headed with
-     * the wrong name is worse than one headed with the right one, and both are
-     * better than no toast.
-     */
-    fun claimIdentity(): Boolean = runCatching {
-        Native.load("shell32", Shell32::class.java)
-            .SetCurrentProcessExplicitAppUserModelID(WString(APP_ID)) == 0
-    }.getOrDefault(false)
 
     /**
      * Show [alert], or do nothing when there is no icon to hang it on.
