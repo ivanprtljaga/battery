@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.Canvas
@@ -59,6 +60,16 @@ private fun Text(
 )
 
 /**
+ * The corner radius for a panel that is not in a window — the `--screenshot`
+ * renders, which are images rather than surfaces and have nobody to round them.
+ *
+ * The real flyout passes zero and lets the compositor do it, which is both the
+ * radius the rest of Windows is using and a preference the user is allowed to
+ * have turned off. See [com.allthingsclaude.battery.windows.win.WindowCorner].
+ */
+val STANDALONE_CORNER = 12.dp
+
+/**
  * The flyout panel — the Windows answer to `Sources/Views/PanelRootView.swift`.
  *
  * Deliberately the same shape as the macOS popover rather than a Windows
@@ -67,12 +78,16 @@ private fun Text(
  * all carry meaning that is already settled.
  */
 @Composable
-fun Panel(state: AppState, modifier: Modifier = Modifier.fillMaxSize()) {
+fun Panel(
+    state: AppState,
+    modifier: Modifier = Modifier.fillMaxSize(),
+    corner: Dp = STANDALONE_CORNER,
+) {
     val palette = LocalBatteryPalette.current
 
     Box(
         modifier
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(corner))
             .background(palette.surface),
     ) {
         Column(Modifier.padding(20.dp)) {

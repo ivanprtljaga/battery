@@ -353,6 +353,25 @@ does nothing is indistinguishable from a tray app that has crashed. There is no
 Compose hook, so the listener goes onto the AWT icon directly, reached through
 `SystemTray.trayIcons`.
 
+**The rounded corner was four white wedges.** The panel rounded itself with a
+`clip(RoundedCornerShape(12.dp))` inside an opaque square window, and a clip
+paints a shape — it does not remove pixels from a window. So the four corners
+outside the arc stayed the AWT frame's default light grey, which is invisible in
+a PNG with a transparent background and glaring on a desktop.
+
+The repair is not a transparent window. Windows 11 already has an opinion about
+a flyout's corner, applies it at the compositor where the shadow and the hit
+region come with it, and lets the user turn it off system-wide — so a hardcoded
+12 dp is a fourth opinion about something the platform owns, of exactly the kind
+the palette refuses to have. The panel now paints the window edge to edge and
+`WindowCorner` asks DWM for the corner via `DWMWA_WINDOW_CORNER_PREFERENCE`,
+which has to be asked for: Windows 11 rounds a framed window on its own and
+leaves an undecorated one square, confirmed by reading the attribute back off a
+live flyout and finding `DWMWCP_DEFAULT`.
+
+The 12 dp survives in one place — `--screenshot`, whose output is an image with
+nobody to round it.
+
 ### Where the flyout lands
 
 `WindowPosition.Aligned(BottomEnd)` was always a placeholder, and Windows 11 is
@@ -399,6 +418,13 @@ Written down rather than discovered later:
 - **Whether `ReadDirectoryChangesW` sees ext4 changes through 9P.** Expected to
   fail, which is why Phase 3 plans for polling. Cheap to settle, and it decides
   the session-detection design.
+- **Whether DWM actually honours the rounded corner.** Setting
+  `DWMWA_WINDOW_CORNER_PREFERENCE` to `DWMWCP_ROUND` returns `S_OK` and reads
+  back as `ROUND` on the development machine, and the compositor still draws the
+  flyout square — because that machine forces square corners system-wide. That
+  is the correct outcome there and it is why it cannot be the test. The panel
+  paints edge to edge either way, so nothing unpainted shows whichever DWM
+  decides; what is unconfirmed is only whether a stock Windows 11 rounds it.
 - **Every DPI other than 150%.** The scale factor is read from the screen rather
   than assumed, so 100% and 200% should follow, but only 150% has been in front
   of anyone. 100% is the interesting one: it is the case where the tray icon

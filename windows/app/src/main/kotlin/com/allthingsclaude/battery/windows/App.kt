@@ -26,6 +26,7 @@ import com.allthingsclaude.battery.windows.tray.TrayAnchor
 import com.allthingsclaude.battery.windows.tray.TrayIconRenderer
 import com.allthingsclaude.battery.windows.ui.BatteryTheme
 import com.allthingsclaude.battery.windows.ui.Panel
+import com.allthingsclaude.battery.windows.win.WindowCorner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -165,7 +166,12 @@ fun main(args: Array<String>) {
             alwaysOnTop = trayAvailable,
         ) {
             BatteryTheme {
-                Panel(state, Modifier.width(360.dp).wrapContentHeight())
+                // Square, and filling the window edge to edge. Rounding the
+                // panel inside an opaque square window is what left white
+                // wedges in the corners: a clip paints a shape, it does not
+                // remove pixels from a window. WindowCorner asks the compositor
+                // to take the corners off instead.
+                Panel(state, Modifier.width(360.dp).wrapContentHeight(), corner = 0.dp)
             }
 
             // Compose sizes a `DpSize.Unspecified` window to its content exactly
@@ -188,6 +194,14 @@ fun main(args: Array<String>) {
                 window.preferredSize = null
                 window.pack()
                 TrayAnchor.flyoutOrigin(window.size)?.let(window::setLocation)
+            }
+
+            // Windows 11 rounds a framed window on its own and leaves an
+            // undecorated one square, so this has to be asked for. Once is
+            // enough — it is a property of the window, not of the frame.
+            LaunchedEffect(Unit) {
+                withFrameNanos { }
+                WindowCorner.round(window)
             }
         }
     }
