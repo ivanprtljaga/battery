@@ -1,0 +1,178 @@
+# Battery for Windows — tray icon, flyout panel, and the WSL problem
+
+The fourth surface, after the macOS menu bar, the iPhone, and Android. Same
+OAuth client, same `/api/oauth/usage` endpoint, same terracotta.
+
+The headline difference from macOS is one line:
+
+```
+the files Battery reads are not on this machine
+```
+
+On a Mac, Claude Code's credentials, `stats-cache.json`, `projects/` and
+`history.jsonl` sit in the same filesystem as the app that reads them. On
+Windows a large share of Claude Code users — the author included — run Claude
+Code **inside WSL**, so all of it lives across a 9P network redirector at
+`\\wsl.localhost\<distro>\home\<user>\.claude`.
+
+Everything below follows from that one fact.
+
+---
+
+## Reading the file boots the machine
+
+Accessing a `\\wsl.localhost` path **starts the distro if it is not running.**
+
+A tray app that reads a credential every sixty seconds would therefore boot a
+Linux VM and hold roughly a gigabyte of RAM, on a machine where the user may not
+have opened a terminal all day. That is disqualifying behaviour for something
+that lives in the notification area, and it is not the kind of bug that shows up
+in a screenshot — the app would look perfect while doing it.
+
+Three rules keep it from happening, and each one already had a home in `core`:
+
+**Probe, never assume.** `wsl.exe -l --running -q` lists running distros without
+starting any. Nothing touches a WSL path unless that probe named the distro
+first.
+
+**Do not re-read credentials on the poll.** The access token is cached in
+memory; the file is re-read only as expiry approaches. `StoredTokens.isExpiringSoon`
+and `AppConfig.TOKEN_REFRESH_LEEWAY_SECONDS` already model exactly this, so the
+credential file is touched every few hours rather than every minute.
+
+**Gate local history on the panel.** Streaks, the heat map, the seven-day chart
+and the project breakdown are read when the panel opens, not on a timer. Nobody
+needs a heat map recomputed behind a closed window.
+
+## `.liveUnavailable` stops being an edge case
+
+macOS treats an unreadable Claude Code credential as a rare accident: a denied
+keychain prompt, a renamed directory. The fix in `32b7451` made the lookup
+three-state so that a mapped account never falls through to Battery's own token
+store — because falling through mints a second refresh chain, and single-use
+refresh tokens mean one of the two copies is then stranded.
+
+On Windows that "rare accident" is **a daily, routine, entirely correct state**:
+the distro is simply shut down. The same three-state lookup ports unchanged and
+carries far more weight here. Only the wording changes — not "credential
+unreadable" but "Ubuntu isn't running", which is a fact about the user's machine
+rather than an error about Battery's.
+
+## What Windows-native Claude Code does
+
+Probed on a real install rather than assumed, the way `ClaudeConfigDir` pins
+Claude Code's config layout:
+
+| | |
+|:--|:--|
+| `%USERPROFILE%\.claude.json` | **Present, with a complete `oauthAccount` block** — `accountUuid`, `emailAddress`, `organizationName`. `ClaudeConfigDir.identity(fromConfig:)` parses this shape today and ports with no changes. |
+| Location of that file | *Beside* `%USERPROFILE%\.claude\`, not inside it — the same special case macOS already carries for `~/.claude.json`. |
+| Credential Manager | **No entry.** `cmdkey /list` names nothing matching `claude`. |
+| `%USERPROFILE%\.claude\.credentials.json` | Absent on the probed machine, which had a stale native install. |
+
+So the credential bridge is a **plaintext file read on both paths**, WSL and
+native. There is no keychain, no `CredRead`, no permission prompt — this is the
+one place Windows is simpler than macOS rather than harder.
+
+The Windows `oauthAccount` block also carries fields no client currently reads —
+`hasExtraUsageEnabled`, `userRateLimitTier`, `organizationRateLimitTier`,
+`billingType`, `seatTier`. That is a free local signal for plan-tier detection
+that the desktop app presently infers, and it would improve macOS too.
+
+---
+
+## Sharing `core`
+
+`core` is **not copied and not moved.** `settings.gradle.kts` mounts
+`../android/core` into this build by redirecting `projectDir`:
+
+```kotlin
+include(":core")
+project(":core").projectDir = file("../android/core")
+```
+
+Two things that look like alternatives are not:
+
+**`includeBuild("../android")`** — a composite build has to evaluate the
+included build's settings, which applies AGP and demands an Android SDK. A
+Windows machine that only wants the desktop app would fail for no benefit.
+
+**Promoting `android/core` to a root `core/`** — structurally honest once two
+platforms share it, and wrong for this fork today. Android work here is
+upstreamed to `allthingsclaude/battery`, where a root `core/` does not exist;
+moving it would make the Android tree diverge and every future Android PR
+harder. Worth proposing upstream as its own change once there is a shipped
+Windows app to justify it. Until then the cost of borrowing is one comment.
+
+This works only because `../android/core/build.gradle.kts` is honestly
+Android-free — `kotlin-jvm`, one runtime JSON dependency, nothing else. **That
+file is the contract.** Its own comment already names the line to defend: *"the
+moment this module needs `android.*`, the shared fixture story is over."* This
+build is what that discipline bought.
+
+Two consequences worth knowing:
+
+- The version catalog here **must** define `kotlin-jvm` and
+  `kotlinx-serialization-json` under the same aliases as `android/`, because this
+  build resolves `../android/core/build.gradle.kts` against *this* catalog.
+  Drifting the Kotlin version would compile the same source two different ways.
+- `core`'s test task resolves fixtures as `rootProject.projectDir.parentFile/fixtures`.
+  From `android/` that is the repo root; from `windows/` it is *also* the repo
+  root. The golden fixtures work from both builds by construction.
+- Both builds write to `android/core/build`. Running them simultaneously is not
+  advisable; nothing else about it matters.
+
+## Layout
+
+```
+windows/
+  app/     everything Windows: tray, flyout, WSL resolver, poll loop
+  core/    → ../android/core, mounted in place, never edited from here
+```
+
+## Status
+
+**Phase 0 — build wiring. Done, unverified.** `:app` links against the borrowed
+`core`. `gradlew :app:run` prints the shared level ramp and endpoints.
+
+- [ ] **Phase 1 — headless poller.** `WindowsConfigDir` (native path, WSL distro
+      enumeration, `looksValid`), the file-based credential bridge with the
+      three-state lookup, `wsl.exe -l --running -q` gating, the token cache, and
+      the poll loop against `UsageApi`. No UI. All the platform risk lives here,
+      which is why it goes first.
+- [ ] **Phase 2 — tray and flyout.** A *drawn* tray bitmap: Windows has no text
+      in the notification area, so the macOS "percentage + time" display modes
+      become icon variants rendered at 16/20/24 px, DPI-aware, redrawn per poll.
+      Then the anchored borderless panel — ports of `PanelRootView`,
+      `SessionGaugeView`, `WeeklyGaugeView`, `ProjectionView`, `ExtraUsageView`.
+- [ ] **Phase 3 — local history.** Panel-gated reads of `stats-cache.json`,
+      `projects/` and `history.jsonl`; streak, heat map, seven-day chart, project
+      breakdown. A polling watcher, and `battery-hook.sh` writing its session
+      marker to a `/mnt/c/...` path so hot-session detection never depends on
+      watching ext4 from Win32.
+- [ ] **Phase 4 — toasts and taskbar.** WinRT toasts at the 80/90/95 thresholds,
+      `ITaskbarList3` overlay icon, both via JNA.
+- [ ] **Phase 5 — ship.** `windows-release.yml` on `windows-latest`, jpackage
+      MSI, `ReleaseFeed` reused unchanged for in-app updates, winget manifest.
+
+The Windows 11 Widgets board — the analogue of the Glance widgets and the iOS
+Home Screen widgets — is deliberately **not** in this list. It needs MSIX and a
+COM server, and it is the one surface where a C#/WinUI port would have been
+easier; deferring it is part of what keeps Compose Desktop the right call.
+
+## Unverified
+
+Written down rather than discovered later. None of it is load-bearing for
+Phase 0, and all of it needs a Windows machine with a JDK:
+
+- **This build has never been run.** It was written on a WSL box with no JDK
+  installed and no Gradle cache; CI is what builds this repository. Phase 0 is
+  "done" in the sense that it is written, not in the sense that it compiled.
+- **Compose Multiplatform 1.12.0 against Kotlin 2.4.10.** Both are the newest
+  stable of each, resolved from live Maven metadata; their mutual compatibility
+  is unconfirmed. Nothing applies the plugin until Phase 2.
+- **Whether `ReadDirectoryChangesW` sees ext4 changes through 9P.** Expected to
+  fail, which is why Phase 3 plans for polling. Cheap to settle, and it decides
+  the session-detection design.
+- **Whether `wsl.exe -l --running -q` is truly side-effect free.** The whole
+  no-boot strategy rests on it.

@@ -1,0 +1,21 @@
+[versions]
+# Resolved against live Maven metadata rather than guessed, same rule as
+# ../android/gradle/libs.versions.toml.
+kotlin = "2.4.10"                # matches android/ exactly. `core` is compiled by
+                                 # both builds, so a drift here would mean the same
+                                 # source compiled two ways.
+kotlinxSerialization = "1.11.0"  # matches android/ — required, not optional: this
+                                 # alias is resolved by ../android/core/build.gradle.kts
+                                 # when this build compiles that module.
+compose = "1.12.0"               # Compose Multiplatform, newest stable. Its Kotlin
+                                 # compatibility has NOT been verified against 2.4.10
+                                 # on a real build yet — first thing to check when
+                                 # Phase 2 starts. Unused until then.
+
+[libraries]
+kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
+
+[plugins]
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+compose = { id = "org.jetbrains.compose", version.ref = "compose" }
