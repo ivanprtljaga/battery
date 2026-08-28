@@ -29,6 +29,7 @@ import com.allthingsclaude.battery.windows.tray.TrayAnchor
 import com.allthingsclaude.battery.windows.tray.TrayIconRenderer
 import com.allthingsclaude.battery.windows.ui.BatteryTheme
 import com.allthingsclaude.battery.windows.ui.Panel
+import com.allthingsclaude.battery.windows.win.TaskbarButton
 import com.allthingsclaude.battery.windows.win.WindowCorner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -275,6 +276,11 @@ fun main(args: Array<String>) {
             LaunchedEffect(Unit) {
                 withFrameNanos { }
                 WindowCorner.round(window)
+                // A flyout is not an app window. Left alone it takes a taskbar
+                // button that appears and disappears as the panel opens, wearing
+                // the Java icon, next to a tray icon that is already this app's
+                // presence on the taskbar.
+                if (trayAvailable) TaskbarButton.hide(window)
             }
         }
     }
