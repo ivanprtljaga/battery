@@ -5,6 +5,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.allthingsclaude.battery.core.SessionHistory
 import com.allthingsclaude.battery.core.InMemorySnapshotStore
+import com.allthingsclaude.battery.core.PollBackoff
+import com.allthingsclaude.battery.core.UsageApiError
 import com.allthingsclaude.battery.core.UsageBucket
 import com.allthingsclaude.battery.windows.auth.DirSelection
 import com.allthingsclaude.battery.windows.auth.TokenCache
@@ -42,9 +44,24 @@ data class UiUsage(
  * structure this app does not have.
  */
 class AppState(
-    private val poller: UsagePoller = UsagePoller(cache = TokenCache()),
+    // A function rather than the poller itself, the same seam DirSelection draws
+    // for credential reads: it is what lets the cadence below be tested without
+    // an account, a network, or a clock.
+    private val poll: (ClaudeDir) -> PollResult = UsagePoller(cache = TokenCache())::poll,
     private val history: SessionHistory = SessionHistory(InMemorySnapshotStore()),
 ) {
+
+    /**
+     * `core`'s backoff, which this app previously did not use.
+     *
+     * The loop delayed a flat sixty seconds whatever the poll returned, so a 429
+     * was answered exactly sixty seconds later, for ever — which is not how you
+     * stop being rate limited. `PollBackoff` is already the port of
+     * `UsagePollingService.swift`'s escalation and already honours `Retry-After`;
+     * the bug was that nothing here asked it anything.
+     */
+    private val backoff = PollBackoff()
+
     var dir by mutableStateOf<ClaudeDir?>(null)
         private set
     var usage by mutableStateOf<UiUsage?>(null)
@@ -56,6 +73,16 @@ class AppState(
     var healthy by mutableStateOf(false)
         private set
     var lastUpdated by mutableStateOf<Instant?>(null)
+        private set
+
+    /**
+     * How long the poll loop should wait before asking again.
+     *
+     * Sixty seconds normally, and longer while the API is refusing. Held as
+     * state rather than returned from [refresh] so that a manual "Refresh now"
+     * cannot quietly reset the loop's pacing to zero.
+     */
+    var nextPollSeconds by mutableStateOf(POLL_SECONDS)
         private set
 
     /** "WSL: Ubuntu", or the reason there is nothing to read. */
@@ -93,6 +120,16 @@ class AppState(
 
     companion object {
         /**
+         * 60 seconds, matching macOS rather than Android's 180.
+         *
+         * The Android cadence is a battery decision — there, a poll is what keeps
+         * a foreground service alive. A desktop is already awake, and the tray
+         * icon is a number people glance at while working, so the tighter loop is
+         * free here in a way it is not on a phone.
+         */
+        const val POLL_SECONDS = 60L
+
+        /**
          * Fixed figures, for offscreen rendering when there is no account to
          * read — so a layout can be reviewed without a credential, a network, or
          * a Windows machine.
@@ -114,7 +151,7 @@ class AppState(
     /** One poll. Safe to call from a background thread; state writes are cheap. */
     fun refresh() {
         val target = dir ?: return
-        when (val result = poller.poll(target)) {
+        when (val result = poll(target)) {
             is PollResult.Ok -> {
                 val response = result.usage
                 val projection = response.fiveHour?.let {
@@ -134,18 +171,32 @@ class AppState(
                 message = null
                 healthy = true
                 lastUpdated = Instant.now()
+                backoff.recordSuccess()
+                nextPollSeconds = POLL_SECONDS
             }
             // A blocked or failed poll never clears `usage`. The distro shutting
             // down does not make the last reading untrue, and blanking the panel
             // for a routine, self-healing state would be the more misleading
             // choice — so the figures stay and the status dot goes grey.
+            //
+            // Blocked does not escalate: nothing was asked of the API, so there
+            // is nothing to be gentle about. It is also the state a stopped
+            // distro sits in, and backing off there would only slow down noticing
+            // that it came back. The escalation is not *cleared* either — a
+            // rate limit outlives a distro going away and coming back.
             is PollResult.Blocked -> {
                 message = result.lookup.message
                 healthy = false
+                nextPollSeconds = POLL_SECONDS
             }
             is PollResult.Failed -> {
                 message = result.error.message
                 healthy = false
+                // The server's own instruction when it sent one. PollBackoff
+                // takes the larger of that and its own escalation, so an
+                // optimistic Retry-After cannot undercut it.
+                val retryAfter = (result.error as? UsageApiError.RateLimited)?.retryAfterSeconds
+                nextPollSeconds = backoff.recordFailure(retryAfter)
             }
         }
     }

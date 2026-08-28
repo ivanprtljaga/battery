@@ -82,7 +82,9 @@ fun main(args: Array<String>) {
         LaunchedEffect(Unit) {
             while (true) {
                 withContext(Dispatchers.IO) { state.refresh() }
-                delay(POLL_SECONDS * 1000L)
+                // The state's own answer, not a constant: after a 429 this is
+                // core's escalating backoff rather than another sixty seconds.
+                delay(state.nextPollSeconds * 1000L)
             }
         }
 
@@ -258,16 +260,6 @@ private fun claimFirstRun(): Boolean = try {
 } catch (_: Exception) {
     false
 }
-
-/**
- * 60 seconds, matching macOS rather than Android's 180.
- *
- * The Android cadence is a battery decision — there, a poll is what keeps a
- * foreground service alive. A desktop is already awake, and the tray icon is a
- * number people glance at while working, so the tighter loop is free here in a
- * way it is not on a phone.
- */
-private const val POLL_SECONDS = 60
 
 internal fun Array<String>.valueOfFlag(flag: String): String? {
     val index = indexOf(flag)
