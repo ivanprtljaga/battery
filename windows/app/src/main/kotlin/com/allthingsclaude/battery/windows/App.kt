@@ -1,5 +1,6 @@
 package com.allthingsclaude.battery.windows
 
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -30,6 +31,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.awt.GraphicsEnvironment
 import java.awt.SystemTray
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
 import kotlin.math.roundToInt
 
 /**
@@ -70,6 +73,11 @@ fun main(args: Array<String>) {
         val state = remember { AppState().also { it.resolve(explicit) } }
         var visible by remember { mutableStateOf(startVisible) }
 
+        // Whether the single-click listener below made it onto the AWT icon.
+        // Until it does, the double click is the only way in, so `onAction` has
+        // to keep working — and stop working the moment it would double up.
+        var singleClickWorks by remember { mutableStateOf(false) }
+
         LaunchedEffect(Unit) {
             while (true) {
                 withContext(Dispatchers.IO) { state.refresh() }
@@ -95,13 +103,44 @@ fun main(args: Array<String>) {
                         .toComposeImageBitmap(),
                 ),
                 tooltip = state.usage?.let { "Battery — ${it.headline.toInt()}%" } ?: "Battery",
-                onAction = { visible = !visible },
+                onAction = { if (!singleClickWorks) visible = !visible },
                 menu = {
                     Item("Show", onClick = { visible = true })
                     Item("Refresh now", onClick = { state.refresh() })
                     Item("Quit", onClick = ::exitApplication)
                 },
             )
+
+            // Open on a *single* left click.
+            //
+            // Compose's `onAction` is AWT's `TrayIcon` ActionListener, and on
+            // Windows that fires on a double click. Every native flyout in the
+            // notification area — the clock, the network, the volume — opens on
+            // one click, so as shipped the icon looked dead to anyone who
+            // clicked it the way Windows taught them. Confirmed by clicking it:
+            // once did nothing, twice opened the panel.
+            //
+            // Compose exposes no hook for this, so the listener goes on the AWT
+            // object directly. `SystemTray.trayIcons` is the way back to the
+            // icon Compose registered, and this effect runs after the one that
+            // registered it.
+            DisposableEffect(Unit) {
+                val listener = object : MouseAdapter() {
+                    override fun mouseReleased(event: MouseEvent) {
+                        if (event.button == MouseEvent.BUTTON1 && event.clickCount == 1) {
+                            visible = !visible
+                        }
+                    }
+                }
+                val icons = runCatching { SystemTray.getSystemTray().trayIcons }
+                    .getOrDefault(emptyArray())
+                icons.forEach { it.addMouseListener(listener) }
+                singleClickWorks = icons.isNotEmpty()
+                onDispose {
+                    icons.forEach { it.removeMouseListener(listener) }
+                    singleClickWorks = false
+                }
+            }
         }
 
         Window(
