@@ -26,6 +26,8 @@ class PollCadenceTest {
         val queue = ArrayDeque(results.toList())
         return AppState(
             poll = { queue.removeFirstOrNull() ?: results.last() },
+            runningDistros = { emptyList() },
+            candidates = { emptyList() },
         ).also { it.resolve("C:\\nowhere\\.claude") }
     }
 

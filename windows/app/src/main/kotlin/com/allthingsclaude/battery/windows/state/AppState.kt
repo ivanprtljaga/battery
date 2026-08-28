@@ -12,8 +12,11 @@ import com.allthingsclaude.battery.windows.auth.DirSelection
 import com.allthingsclaude.battery.windows.auth.TokenCache
 import com.allthingsclaude.battery.windows.config.ClaudeConfigDir
 import com.allthingsclaude.battery.windows.config.ClaudeDir
+import com.allthingsclaude.battery.windows.config.DirOrigin
+import com.allthingsclaude.battery.windows.config.SourcePreference
 import com.allthingsclaude.battery.windows.poll.PollResult
 import com.allthingsclaude.battery.windows.poll.UsagePoller
+import com.allthingsclaude.battery.windows.wsl.Wsl
 import java.io.File
 import java.time.Instant
 
@@ -48,6 +51,12 @@ class AppState(
     // for credential reads: it is what lets the cadence below be tested without
     // an account, a network, or a clock.
     private val poll: (ClaudeDir) -> PollResult = UsagePoller(cache = TokenCache())::poll,
+    // The two halves of discovery, separately, because the memo below needs the
+    // cheap one to decide whether to pay for the expensive one — and because a
+    // test of the poll cadence has no business starting a subprocess.
+    private val runningDistros: () -> List<String> = { Wsl.running() },
+    private val candidates: () -> List<ClaudeDir> = { ClaudeConfigDir.candidates() },
+    private val preferenceFile: File = SourcePreference.defaultFile(),
     private val history: SessionHistory = SessionHistory(InMemorySnapshotStore()),
 ) {
 
@@ -85,6 +94,19 @@ class AppState(
     var nextPollSeconds by mutableStateOf(POLL_SECONDS)
         private set
 
+    /**
+     * Every directory the user could switch to, for the tray's Source menu.
+     *
+     * Recomputed only when the set of running distros changes, because building
+     * it costs a `whoami` inside each running distro and the answer does not
+     * move while nothing starts or stops. The probe that guards it is the cheap
+     * one, and it is the one now demonstrated not to start anything.
+     */
+    var sources by mutableStateOf<List<ClaudeDir>>(emptyList())
+        private set
+
+    private var lastRunning: List<String>? = null
+
     /** "WSL: Ubuntu", or the reason there is nothing to read. */
     val sourceLabel: String get() = dir?.label ?: "No Claude Code directory"
 
@@ -97,18 +119,55 @@ class AppState(
         get() = usage != null && !healthy
 
     fun resolve(explicit: String? = null) {
-        dir = if (explicit != null) {
-            ClaudeDir(
-                ClaudeConfigDir.normalize(explicit),
-                com.allthingsclaude.battery.windows.config.DirOrigin.EXPLICIT,
-            )
-        } else {
-            // Not `.first()`: the cheapest candidate is not necessarily the one
-            // that can answer. See DirSelection.
-            DirSelection.pick(ClaudeConfigDir.candidates())
+        refreshSources()
+        dir = when {
+            explicit != null -> ClaudeDir(ClaudeConfigDir.normalize(explicit), DirOrigin.EXPLICIT)
+            // A pin is honoured even when it is not among today's candidates —
+            // a shut-down distro should say so, not hand the question to the
+            // other install and answer with a different session window under a
+            // label nobody chose. The stored origin keeps the gate that makes
+            // saying so free. See SourcePreference.
+            else -> SourcePreference.load(preferenceFile)
+                // Not `.first()`: the cheapest candidate is not necessarily the
+                // one that can answer. See DirSelection.
+                ?: DirSelection.pick(sources)
         }
         identity = dir?.let { readIdentity(it) }
         if (dir == null) message = "No Claude Code directory found"
+    }
+
+    /**
+     * Pin [source] and poll it straight away.
+     *
+     * The figures are cleared rather than left dimmed, which is the opposite of
+     * what a failed poll does — and deliberately so. A failed poll leaves the
+     * last reading standing because it is still the best answer *about the same
+     * install*; switching source makes it an answer about a different one, and
+     * showing it under the new label would be the misleading choice rather than
+     * the honest one.
+     *
+     * Safe to call from a background thread, like [refresh], and it should be:
+     * this reads a credential and then talks to the network.
+     */
+    fun select(source: ClaudeDir) {
+        SourcePreference.save(source, preferenceFile)
+        dir = source
+        identity = readIdentity(source)
+        usage = null
+        message = null
+        healthy = false
+        lastUpdated = null
+        refresh()
+    }
+
+    /**
+     * Rebuild [sources] when, and only when, the running distros have changed.
+     */
+    private fun refreshSources() {
+        val running = runCatching { runningDistros() }.getOrDefault(emptyList())
+        if (running == lastRunning && sources.isNotEmpty()) return
+        lastRunning = running
+        sources = runCatching { candidates() }.getOrDefault(emptyList())
     }
 
     private fun readIdentity(dir: ClaudeDir): String? =
@@ -150,6 +209,7 @@ class AppState(
 
     /** One poll. Safe to call from a background thread; state writes are cheap. */
     fun refresh() {
+        refreshSources()
         val target = dir ?: return
         when (val result = poll(target)) {
             is PollResult.Ok -> {

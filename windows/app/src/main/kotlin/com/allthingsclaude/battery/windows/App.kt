@@ -5,6 +5,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.graphics.painter.BitmapPainter
@@ -29,6 +30,7 @@ import com.allthingsclaude.battery.windows.ui.Panel
 import com.allthingsclaude.battery.windows.win.WindowCorner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.awt.GraphicsEnvironment
 import java.awt.SystemTray
@@ -79,6 +81,10 @@ fun main(args: Array<String>) {
         // to keep working — and stop working the moment it would double up.
         var singleClickWorks by remember { mutableStateOf(false) }
 
+        // Menu clicks poll, and polling is a credential read and a network call.
+        // Running that on the event thread freezes the menu it was clicked from.
+        val scope = rememberCoroutineScope()
+
         LaunchedEffect(Unit) {
             while (true) {
                 withContext(Dispatchers.IO) { state.refresh() }
@@ -109,7 +115,34 @@ fun main(args: Array<String>) {
                 onAction = { if (!singleClickWorks) visible = !visible },
                 menu = {
                     Item("Show", onClick = { visible = true })
-                    Item("Refresh now", onClick = { state.refresh() })
+                    Item("Refresh now", onClick = { scope.launch(Dispatchers.IO) { state.refresh() } })
+                    Separator()
+                    // Which install to read. Two are normal on a machine with
+                    // WSL, both can be signed in, and their session windows are
+                    // different numbers — so this is a preference, and the app
+                    // has no business guessing it twice.
+                    Menu("Source") {
+                        if (state.sources.isEmpty()) {
+                            Item("No Claude Code directory", enabled = false, onClick = {})
+                        }
+                        // CheckboxItem rather than RadioButtonItem, which is the
+                        // shape this actually is: AWT's menus are built from
+                        // java.awt.CheckboxMenuItem and have no radio at all, so
+                        // Compose throws rather than approximating one.
+                        state.sources.forEach { source ->
+                            CheckboxItem(
+                                text = source.label,
+                                checked = state.dir?.path == source.path,
+                                onCheckedChange = { wanted ->
+                                    // Unticking the active source would leave the
+                                    // app with none; the only gesture that means
+                                    // anything here is ticking a different one.
+                                    if (wanted) scope.launch(Dispatchers.IO) { state.select(source) }
+                                },
+                            )
+                        }
+                    }
+                    Separator()
                     Item("Quit", onClick = ::exitApplication)
                 },
             )
