@@ -20,6 +20,11 @@ dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
         mavenCentral()
+        // Not a mistake, and not an Android dependency: Compose Multiplatform
+        // 1.12 resolves parts of `androidx.lifecycle` and `androidx.savedstate`
+        // that are published only to Google's Maven. Nothing here applies AGP or
+        // needs an SDK — these are plain JVM artifacts that happen to live there.
+        google()
         maven("https://maven.pkg.jetbrains.space/public/p/compose/dev")
     }
 }

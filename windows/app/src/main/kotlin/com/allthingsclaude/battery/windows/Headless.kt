@@ -16,7 +16,12 @@ import java.time.Duration
 import java.time.Instant
 
 /**
- * Phase 1: the headless poller.
+ * Phase 1: the headless poller, kept as a mode of the app rather than deleted.
+ *
+ * A console that prints the whole resolution chain — which directory, whose
+ * account, what the credential said, what the API answered — is the fastest way
+ * to tell a UI bug from a data bug, and it is the only part of this app that can
+ * be exercised anywhere but Windows.
  *
  * No window, no tray icon. Every genuinely risky thing about this port — finding
  * Claude Code's directory when it is inside WSL, reading a credential without
@@ -25,13 +30,12 @@ import java.time.Instant
  * discovering that the token was NUL-interleaved all along.
  *
  * ```
- * gradlew :app:run                        # resolve, report, poll once
- * gradlew :app:run --args="--watch"       # keep polling
- * gradlew :app:run --args="--dir <path>"  # an explicit directory
+ * gradlew :app:run --args="--headless"           # resolve, report, poll once
+ * gradlew :app:run --args="--headless --watch"   # keep polling
  * ```
  */
-fun main(args: Array<String>) {
-    val explicit = args.valueOf("--dir") ?: System.getenv("BATTERY_CLAUDE_DIR")
+fun runHeadless(args: Array<String>) {
+    val explicit = args.valueOfFlag("--dir") ?: System.getenv("BATTERY_CLAUDE_DIR")
     val watch = args.contains("--watch")
 
     println("Battery for Windows — Phase 1 (headless)")
@@ -130,9 +134,4 @@ private fun resets(at: Instant?): String {
     val seconds = at.epochSecond - Instant.now().epochSecond
     if (seconds <= 0) return "(resetting)"
     return "resets in ${seconds / 3600}h ${(seconds % 3600) / 60}m"
-}
-
-private fun Array<String>.valueOf(flag: String): String? {
-    val index = indexOf(flag)
-    return if (index >= 0 && index + 1 < size) this[index + 1] else null
 }

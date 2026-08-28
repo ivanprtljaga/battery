@@ -7,12 +7,15 @@ kotlin = "2.4.10"                # matches android/ exactly. `core` is compiled 
 kotlinxSerialization = "1.11.0"  # matches android/ — required, not optional: this
                                  # alias is resolved by ../android/core/build.gradle.kts
                                  # when this build compiles that module.
-compose = "1.12.0"               # Compose Multiplatform, newest stable. Its Kotlin
-                                 # compatibility has NOT been verified against 2.4.10
-                                 # on a real build yet — first thing to check when
-                                 # Phase 2 starts. Unused until then.
+compose = "1.12.0"               # Compose Multiplatform, newest stable, verified
+                                 # building and running against Kotlin 2.4.10.
 
 [libraries]
+# Compose Multiplatform for the desktop. Declared by coordinate rather than via
+# the plugin's `compose.desktop.currentOS` helper: that accessor is gone in
+# 1.12, and `compose.material3` is deprecated in favour of direct coordinates.
+compose-desktop = { group = "org.jetbrains.compose.desktop", name = "desktop-jvm", version.ref = "compose" }
+
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
 
 [plugins]

@@ -17,6 +17,14 @@ Code **inside WSL**, so all of it lives across a 9P network redirector at
 
 Everything below follows from that one fact.
 
+| | |
+|:--|:--|
+| ![The panel, dark](../assets/windows-panel.png) | ![The panel, light](../assets/windows-panel-light.png) |
+
+Rendered by `--screenshot`, which draws the panel through the same Skia path a
+real window uses — so these are the actual rendering, not a mockup, and they were
+produced on Linux without opening a window.
+
 ---
 
 ## Reading the file boots the machine
@@ -132,6 +140,32 @@ windows/
   core/    → ../android/core, mounted in place, never edited from here
 ```
 
+## Running it on Windows
+
+Needs a JDK 17 or newer — Gradle itself needs a JVM to start, so this is the one
+prerequisite that cannot be automated away:
+
+```
+winget install EclipseAdoptium.Temurin.21.JDK
+```
+
+Then, from `windows\`:
+
+```
+.\gradlew.bat :app:run --args="--panel"
+```
+
+`--panel` shows the flyout immediately. Without it the app starts as a tray icon
+only, which on a first run looks like nothing happened.
+
+The build resolves its own Skia binary from the host, so nothing needs
+configuring: run it on Windows and it fetches `desktop-jvm-windows-x64`, the same
+build file that fetches `linux-x64` here.
+
+If it finds nothing, `--args="--headless"` prints the whole resolution chain —
+which directories it considered, which distros are running, whose account each
+one is signed in as, and exactly why a credential could not be read.
+
 ## Status
 
 **Phase 0 — build wiring. Done and verified.** `:app` links against the borrowed
@@ -171,11 +205,41 @@ UTF-8. `WslCommand` splits `run` from `exec` for exactly this reason — decodin
 token close to expiry, and refreshing is the one thing a bridged client must not
 do. `UsagePoller` calls `requestUsage` only; when a token goes stale the answer
 is to re-read Claude Code's file, never to rotate its chain.
-- [ ] **Phase 2 — tray and flyout.** A *drawn* tray bitmap: Windows has no text
-      in the notification area, so the macOS "percentage + time" display modes
-      become icon variants rendered at 16/20/24 px, DPI-aware, redrawn per poll.
-      Then the anchored borderless panel — ports of `PanelRootView`,
-      `SessionGaugeView`, `WeeklyGaugeView`, `ProjectionView`, `ExtraUsageView`.
+**Phase 2 — tray and flyout. Done; rendered and verified, but not yet on
+Windows.** Compose Multiplatform 1.12.0 against Kotlin 2.4.10, confirmed
+building and running rather than assumed. 36 tests.
+
+```
+gradlew :app:run                                     # tray icon; click for the panel
+gradlew :app:run --args="--panel"                    # panel up front
+gradlew :app:run --args="--headless"                 # Phase 1's console poller
+gradlew :app:run --args="--screenshot build/shots"   # every surface to PNG, no window
+```
+
+**The tray icon is drawn, because Windows has no text in the notification area.**
+The macOS display modes ("percentage + time", "percentage only") are AppKit
+laying out a string; here the same choice becomes three *pictures* —
+`TrayIconRenderer.Mode` — each rendered per poll at whatever size the current DPI
+asks for. Java2D rather than Compose: the shell wants a `BufferedImage` at an
+exact pixel count, which is what Java2D is for and what a composable is not. Each
+of 16/20/24/32 is drawn at its own size; rendering one and letting the shell
+scale it is what makes a tray icon look muddy. At 16 px the combined ring-plus-
+number mode drops the number rather than draw a smudge, which is a test rather
+than a hope.
+
+**A stale reading is dimmed, never blanked.** When the distro stops or the
+network drops, the last figure is still the best answer available, so the ring
+goes hollow and the status dot goes grey while the numbers stay. Blanking the
+panel for a routine, self-healing state would be the more misleading choice.
+
+**No Material3.** The panel sets its own colour, size and weight on every call,
+so Material would be a layer of defaults nothing reads; `BasicText` from
+foundation is the whole requirement. Every colour comes from `core`'s
+`BatteryPalette`, so nothing here holds a fourth opinion about what the brand is.
+
+`--screenshot` renders the panel through the same Skia path a real window uses,
+via `ImageComposeScene`, so a layout can be reviewed without Windows, a
+credential, or a display. That is how both themes above were checked.
 - [ ] **Phase 3 — local history.** Panel-gated reads of `stats-cache.json`,
       `projects/` and `history.jsonl`; streak, heat map, seven-day chart, project
       breakdown. A polling watcher, and `battery-hook.sh` writing its session
