@@ -33,7 +33,9 @@ Three rules keep it from happening, and each one already had a home in `core`:
 
 **Probe, never assume.** `wsl.exe -l --running -q` lists running distros without
 starting any. Nothing touches a WSL path unless that probe named the distro
-first.
+first. Its output is **UTF-16LE with CRLF** — verified by hexdump rather than
+assumed — so it must be decoded explicitly. Read with the JVM's default charset
+it becomes a NUL-interleaved string that compares equal to nothing.
 
 **Do not re-read credentials on the poll.** The access token is cached in
 memory; the file is re-read only as expiry approaches. `StoredTokens.isExpiringSoon`
@@ -132,8 +134,16 @@ windows/
 
 ## Status
 
-**Phase 0 — build wiring. Done, unverified.** `:app` links against the borrowed
-`core`. `gradlew :app:run` prints the shared level ramp and endpoints.
+**Phase 0 — build wiring. Done and verified.** `:app` links against the borrowed
+`core` with no Android SDK present, and `gradlew :app:run` prints the shared
+level ramp and endpoints. `gradlew :core:test` then runs the shared suite —
+**118 tests, 12 suites, 0 failures** — from *this* build against the golden
+fixtures at the repo root, which is the borrowed-module wiring proving itself
+end to end.
+
+```
+cd windows && ./gradlew :app:run :core:test
+```
 
 - [ ] **Phase 1 — headless poller.** `WindowsConfigDir` (native path, WSL distro
       enumeration, `looksValid`), the file-based credential bridge with the
@@ -163,16 +173,16 @@ easier; deferring it is part of what keeps Compose Desktop the right call.
 ## Unverified
 
 Written down rather than discovered later. None of it is load-bearing for
-Phase 0, and all of it needs a Windows machine with a JDK:
+Phase 0:
 
-- **This build has never been run.** It was written on a WSL box with no JDK
-  installed and no Gradle cache; CI is what builds this repository. Phase 0 is
-  "done" in the sense that it is written, not in the sense that it compiled.
 - **Compose Multiplatform 1.12.0 against Kotlin 2.4.10.** Both are the newest
   stable of each, resolved from live Maven metadata; their mutual compatibility
   is unconfirmed. Nothing applies the plugin until Phase 2.
 - **Whether `ReadDirectoryChangesW` sees ext4 changes through 9P.** Expected to
   fail, which is why Phase 3 plans for polling. Cheap to settle, and it decides
   the session-detection design.
-- **Whether `wsl.exe -l --running -q` is truly side-effect free.** The whole
-  no-boot strategy rests on it.
+- **Whether `wsl.exe -l --running -q` is side-effect free on a *stopped*
+  distro.** The command works and its output format is now pinned, but it has
+  only ever been run while the distro was already up — which cannot distinguish
+  "does not start one" from "did not need to". The entire no-boot strategy rests
+  on this, and settling it needs a second, shut-down distro.
