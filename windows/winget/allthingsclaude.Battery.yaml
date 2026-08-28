@@ -1,0 +1,6 @@
+# Copy to winget-pkgs, replacing <VERSION>. See README.md.
+PackageIdentifier: allthingsclaude.Battery
+PackageVersion: <VERSION>
+DefaultLocale: en-US
+ManifestType: version
+ManifestVersion: 1.6.0

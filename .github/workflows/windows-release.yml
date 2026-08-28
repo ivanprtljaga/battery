@@ -1,0 +1,127 @@
+name: Windows Release
+
+# `windows-v*` is a fourth tag namespace beside `v*` (Mac), `ios-v*` and
+# `android-v*`, for the reason the other two exist: the platforms ship on their
+# own cadences and a Windows patch should not cut a menu-bar release.
+on:
+  push:
+    tags:
+      - 'windows-v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build (e.g. 0.1.0), without the windows-v prefix'
+        required: true
+
+jobs:
+  release:
+    # jpackage cannot cross-build: a Windows installer is built on Windows or
+    # not at all. This is the only job in the repository that needs this runner.
+    runs-on: windows-latest
+    permissions:
+      contents: write   # needed to create the release
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          # 21, not the 17 the Android job uses. jpackage ships with the JDK and
+          # the runtime it bundles is the one that builds it, so this is also the
+          # JVM every user ends up running.
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
+
+      # The dispatch input arrives through `env`, not `${{ }}` inside the script,
+      # for the reason android-release.yml sets out at length: interpolated
+      # directly it is pasted into the shell before it runs, in a job holding
+      # `contents: write`.
+      - name: Resolve version
+        id: version
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          if [ -n "$INPUT_VERSION" ]; then
+            VERSION="$INPUT_VERSION"
+          else
+            VERSION="${GITHUB_REF_NAME#windows-v}"
+          fi
+          # Windows Installer will not take anything else: a ProductVersion is
+          # three numbers. Rejecting it here beats a jpackage failure six
+          # minutes in, and beats shipping an MSI that cannot upgrade itself.
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Version '$VERSION' is not major.minor.patch."
+            echo "::error::MSI ProductVersion takes three numbers and no suffix."
+            exit 1
+          fi
+          echo "name=$VERSION" >> "$GITHUB_OUTPUT"
+          # Derived, never `github.ref_name`: on workflow_dispatch that is the
+          # branch, so the dispatch path would publish a release tagged `main` —
+          # which the updater, filtering on `windows-v`, would never see.
+          echo "tag=windows-v$VERSION" >> "$GITHUB_OUTPUT"
+
+      # No WiX step, and that is not an oversight. jpackage drives WiX to build
+      # an MSI, but the Compose Gradle plugin fetches WiX 3.11.2 into
+      # `windows/build/wix311/` and hands jpackage that copy — verified on a
+      # machine with no WiX installed and no administrator, which is also why
+      # anyone who clones this can build the installer.
+
+
+      # The shared module and the Windows app. `core` is the Android tree's,
+      # borrowed in place, so this also proves the borrow still resolves from a
+      # clean checkout on a machine with no Android SDK.
+      - name: Test
+        working-directory: windows
+        run: ./gradlew.bat test
+
+      - name: Build MSI
+        working-directory: windows
+        shell: bash
+        env:
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+        run: |
+          # releaseRepo is where this build looks for its own updates, derived
+          # from the repository being built so a fork finds the fork's releases.
+          # See android-release.yml, which learned this the same way.
+          ./gradlew.bat :app:packageMsi \
+            -PappVersion="$VERSION_NAME" \
+            -PreleaseRepo="$GITHUB_REPOSITORY"
+
+      - name: Collect artifact
+        id: artifact
+        shell: pwsh
+        env:
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+        run: |
+          $msi = Get-ChildItem windows/app/build/compose/binaries/main/msi/*.msi | Select-Object -First 1
+          if (-not $msi) { throw "no MSI produced" }
+          $dst = "battery-$env:VERSION_NAME.msi"
+          Move-Item $msi.FullName $dst
+          # winget's manifest wants this, and computing it here means the number
+          # published and the number submitted are the same bytes by
+          # construction. See windows/winget/README.md.
+          $sha = (Get-FileHash $dst -Algorithm SHA256).Hash
+          Write-Host "sha256: $sha"
+          "path=$dst"   | Out-File $env:GITHUB_OUTPUT -Append
+          "sha256=$sha" | Out-File $env:GITHUB_OUTPUT -Append
+
+      - name: Publish release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          files: ${{ steps.artifact.outputs.path }}
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Battery for Windows ${{ steps.version.outputs.name }}
+          body: |
+            Download the `.msi` below and run it. It installs per-user, so it
+            never asks for an administrator.
+
+            Requires Windows 10 or later; the rounded flyout and the toasts are
+            Windows 11. Claude Code can be installed natively or inside WSL —
+            Battery finds both and the tray menu chooses between them.
+
+            No Java needed: the installer carries its own runtime.
+
+            SHA256: `${{ steps.artifact.outputs.sha256 }}`
+          generate_release_notes: true

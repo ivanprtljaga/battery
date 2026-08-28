@@ -1,0 +1,26 @@
+# Copy to winget-pkgs, replacing <VERSION>. See README.md.
+PackageIdentifier: allthingsclaude.Battery
+PackageVersion: <VERSION>
+PackageLocale: en-US
+Publisher: allthingsclaude
+PublisherUrl: https://github.com/allthingsclaude
+PackageName: Battery
+PackageUrl: https://github.com/allthingsclaude/battery
+License: MIT
+ShortDescription: Claude Code usage in the notification area
+Description: |-
+  A tray app that shows how much of your Claude Code five-hour session and
+  weekly windows you have used, with a seven-day chart and a per-project
+  breakdown read from Claude Code's own transcripts.
+
+  Finds Claude Code whether it is installed natively or inside WSL, and never
+  starts a stopped distro to do it.
+Tags:
+- claude
+- claude-code
+- developer-tools
+- tray
+- usage
+ReleaseNotesUrl: https://github.com/allthingsclaude/battery/releases/tag/windows-v<VERSION>
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0
