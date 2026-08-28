@@ -14,11 +14,14 @@ import com.allthingsclaude.battery.windows.auth.TokenCache
 import com.allthingsclaude.battery.windows.config.ClaudeConfigDir
 import com.allthingsclaude.battery.windows.config.ClaudeDir
 import com.allthingsclaude.battery.windows.config.DirOrigin
+import com.allthingsclaude.battery.windows.config.NotifyPreference
 import com.allthingsclaude.battery.windows.config.SourcePreference
 import com.allthingsclaude.battery.windows.history.DayUsage
 import com.allthingsclaude.battery.windows.history.LocalHistory
 import com.allthingsclaude.battery.windows.history.LocalStats
 import com.allthingsclaude.battery.windows.history.ProjectUsage
+import com.allthingsclaude.battery.windows.notify.Alert
+import com.allthingsclaude.battery.windows.notify.ThresholdAlerts
 import com.allthingsclaude.battery.windows.poll.PollResult
 import com.allthingsclaude.battery.windows.poll.UsagePoller
 import com.allthingsclaude.battery.windows.wsl.Wsl
@@ -64,6 +67,12 @@ class AppState(
     private val candidates: () -> List<ClaudeDir> = { ClaudeConfigDir.candidates() },
     private val preferenceFile: File = SourcePreference.defaultFile(),
     private val history: (ClaudeDir) -> LocalStats? = { LocalHistory.read(it) },
+    private val alerts: ThresholdAlerts = ThresholdAlerts(),
+    /**
+     * Where an alert goes. A seam rather than a direct call, so the decision to
+     * interrupt somebody can be tested without a notification area.
+     */
+    private val notify: (Alert) -> Unit = { },
     private val burnRate: SessionHistory = SessionHistory(InMemorySnapshotStore()),
 ) {
 
@@ -113,6 +122,15 @@ class AppState(
         private set
 
     private var lastRunning: List<String>? = null
+
+    /**
+     * Whether threshold toasts are allowed, read once and remembered.
+     *
+     * Held as state so the tray's tick follows it without re-reading a file on
+     * every recomposition.
+     */
+    var notifications by mutableStateOf(NotifyPreference.enabled())
+        private set
 
     /**
      * The seven-day chart and the project breakdown, or null when they have not
@@ -194,6 +212,17 @@ class AppState(
         lastUpdated = null
         refresh()
         loadHistory()
+    }
+
+    /**
+     * Turn threshold toasts on or off, and remember it.
+     *
+     * Not `setNotifications`: that is the JVM signature Kotlin already generates
+     * for the property's own (private) setter, and the two would collide.
+     */
+    fun allowNotifications(enabled: Boolean) {
+        notifications = enabled
+        NotifyPreference.set(enabled)
     }
 
     /**
@@ -294,6 +323,15 @@ class AppState(
                 lastUpdated = Instant.now()
                 backoff.recordSuccess()
                 nextPollSeconds = POLL_SECONDS
+
+                // The session window only. The weekly one moves too slowly for a
+                // threshold to mean "act now", and it is what the panel is for.
+                // A blocked or failed poll says nothing rather than
+                // re-announcing a number it did not just measure.
+                response.fiveHour?.let { session ->
+                    val alert = alerts.evaluate(session.utilization)
+                    if (alert != null && notifications) notify(alert)
+                }
             }
             // A blocked or failed poll never clears `usage`. The distro shutting
             // down does not make the last reading untrue, and blanking the panel

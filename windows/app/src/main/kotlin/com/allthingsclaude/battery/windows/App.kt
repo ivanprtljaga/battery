@@ -22,6 +22,8 @@ import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.allthingsclaude.battery.windows.dev.renderScreenshots
+import com.allthingsclaude.battery.windows.notify.Alert
+import com.allthingsclaude.battery.windows.notify.Toaster
 import com.allthingsclaude.battery.windows.state.AppState
 import com.allthingsclaude.battery.windows.tray.TrayAnchor
 import com.allthingsclaude.battery.windows.tray.TrayIconRenderer
@@ -46,6 +48,7 @@ import kotlin.math.roundToInt
  * gradlew :app:run --args="--panel"      # panel up front, for a screenshot
  * gradlew :app:run --args="--headless"   # Phase 1's console poller
  * gradlew :app:run --args="--screenshot build/shots"   # render every surface to PNG
+ * gradlew :app:run --args="--toast"      # fire one sample toast and show it
  * ```
  */
 fun main(args: Array<String>) {
@@ -69,11 +72,18 @@ fun main(args: Array<String>) {
     // WSLg during development. Falling back to a plain visible window keeps the
     // app usable and, more to the point, keeps the panel reviewable somewhere
     // other than Windows.
+    // Before the first toast: a notification is attributed to its process's
+    // AppUserModelID, and an unregistered java.exe has the JDK's. Without this
+    // the app announces itself as "OpenJDK Platform binary".
+    Toaster.claimIdentity()
+
     val trayAvailable = runCatching { SystemTray.isSupported() }.getOrDefault(false)
     val startVisible = args.contains("--panel") || !trayAvailable || claimFirstRun()
 
     application {
-        val state = remember { AppState().also { it.resolve(explicit) } }
+        val state = remember {
+            AppState(notify = { Toaster.show(it) }).also { it.resolve(explicit) }
+        }
         var visible by remember { mutableStateOf(startVisible) }
 
         // Whether the single-click listener below made it onto the AWT icon.
@@ -142,6 +152,11 @@ fun main(args: Array<String>) {
                             )
                         }
                     }
+                    CheckboxItem(
+                        text = "Notify at 80/90/95%",
+                        checked = state.notifications,
+                        onCheckedChange = { state.allowNotifications(it) },
+                    )
                     Separator()
                     Item("Quit", onClick = ::exitApplication)
                 },
@@ -160,6 +175,22 @@ fun main(args: Array<String>) {
             // object directly. `SystemTray.trayIcons` is the way back to the
             // icon Compose registered, and this effect runs after the one that
             // registered it.
+            // Whether a toast actually reaches the notification centre is not
+            // something a test can answer — the same gap `--screenshot` fills
+            // for the panel. One sample alert, on demand, through the exact path
+            // a real threshold crossing takes.
+            if (args.contains("--toast")) {
+                LaunchedEffect(Unit) {
+                    delay(1500)
+                    Toaster.show(
+                        Alert(
+                            "Session usage at 90%",
+                            "Your five-hour Claude Code window is at 91%.",
+                        ),
+                    )
+                }
+            }
+
             DisposableEffect(Unit) {
                 val listener = object : MouseAdapter() {
                     override fun mouseReleased(event: MouseEvent) {
