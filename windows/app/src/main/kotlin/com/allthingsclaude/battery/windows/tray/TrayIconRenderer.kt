@@ -26,13 +26,23 @@ object TrayIconRenderer {
 
     /** What the icon says. The Windows analogue of the macOS display modes. */
     enum class Mode {
-        /** A ring alone — the calmest, and the only one legible at 16 px. */
+        /** A ring alone — the calmest, and legible at every size. */
         RING,
 
-        /** A ring with the percentage inside it. Needs 20 px or more to read. */
+        /**
+         * A ring with the percentage inside it, and the ring alone below
+         * [PERCENT_THRESHOLD].
+         *
+         * The ring takes the outside of the icon and the digits get what is
+         * left, which is why this is the mode that runs out of room first.
+         */
         RING_WITH_PERCENT,
 
-        /** The number alone, filling the icon. Loudest, and the most legible. */
+        /**
+         * The number alone, filling the icon. Loudest, most legible, and the
+         * only mode that carries a readable number at 16 px — the digits get
+         * the whole box instead of the hole in the middle of a ring.
+         */
         PERCENT,
     }
 
@@ -44,6 +54,19 @@ object TrayIconRenderer {
      * its own size from scratch.
      */
     val SIZES = listOf(16, 20, 24, 32)
+
+    /**
+     * The size at which a percentage inside a ring becomes worth drawing.
+     *
+     * Judged on a real notification area rather than from the PNGs: at 20 px the
+     * two digits sit in about eight pixels of ring interior and anti-alias into
+     * a smudge, which reads as a dirty icon rather than as a number — worse than
+     * the clean ring it replaces. 24 px, which is what a 150% display asks for,
+     * is where they resolve. Below this the mode degrades to [Mode.RING], and
+     * anyone who wants a number at 16 px wants [Mode.PERCENT], where the digits
+     * get the whole icon.
+     */
+    const val PERCENT_THRESHOLD = 24
 
     /**
      * @param utilization 0–100.
@@ -71,7 +94,7 @@ object TrayIconRenderer {
             Mode.RING -> drawRing(g, size, utilization, color, stale)
             Mode.RING_WITH_PERCENT -> {
                 drawRing(g, size, utilization, color, stale)
-                if (size >= 20) drawPercent(g, size, utilization, color, inset = true)
+                if (size >= PERCENT_THRESHOLD) drawPercent(g, size, utilization, color, inset = true)
             }
         }
 

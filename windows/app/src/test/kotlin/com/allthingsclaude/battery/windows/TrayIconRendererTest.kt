@@ -101,22 +101,28 @@ class TrayIconRendererTest {
     }
 
     /**
-     * 16 px cannot hold a ring and two digits at once, so the combined mode
-     * degrades to the ring alone rather than drawing a smudge.
+     * Neither 16 nor 20 px can hold a ring and two digits at once, so the
+     * combined mode degrades to the ring alone rather than drawing a smudge.
+     * 20 is in here because it used to be the threshold and looked wrong on a
+     * real taskbar.
      */
     @Test
-    fun `ring with percent drops the number at 16px`() {
-        val ringOnly = TrayIconRenderer.render(60.0, 16, TrayIconRenderer.Mode.RING)
-        val combined = TrayIconRenderer.render(60.0, 16, TrayIconRenderer.Mode.RING_WITH_PERCENT)
-        assertEquals(opaquePixels(ringOnly), opaquePixels(combined))
+    fun `ring with percent drops the number below the threshold`() {
+        for (size in TrayIconRenderer.SIZES.filter { it < TrayIconRenderer.PERCENT_THRESHOLD }) {
+            val ringOnly = TrayIconRenderer.render(60.0, size, TrayIconRenderer.Mode.RING)
+            val combined = TrayIconRenderer.render(60.0, size, TrayIconRenderer.Mode.RING_WITH_PERCENT)
+            assertEquals(opaquePixels(ringOnly), opaquePixels(combined), "at $size px")
+        }
     }
 
     /** …and keeps it once there is room. */
     @Test
-    fun `ring with percent keeps the number at 20px and up`() {
-        val ringOnly = TrayIconRenderer.render(60.0, 20, TrayIconRenderer.Mode.RING)
-        val combined = TrayIconRenderer.render(60.0, 20, TrayIconRenderer.Mode.RING_WITH_PERCENT)
-        assertTrue(opaquePixels(combined) > opaquePixels(ringOnly))
+    fun `ring with percent keeps the number at the threshold and up`() {
+        for (size in TrayIconRenderer.SIZES.filter { it >= TrayIconRenderer.PERCENT_THRESHOLD }) {
+            val ringOnly = TrayIconRenderer.render(60.0, size, TrayIconRenderer.Mode.RING)
+            val combined = TrayIconRenderer.render(60.0, size, TrayIconRenderer.Mode.RING_WITH_PERCENT)
+            assertTrue(opaquePixels(combined) > opaquePixels(ringOnly), "at $size px")
+        }
     }
 
     /** 100% would not fit in a 16 px box; the label clamps rather than overflow. */

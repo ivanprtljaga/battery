@@ -26,7 +26,9 @@ import com.allthingsclaude.battery.windows.ui.Panel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import java.awt.GraphicsEnvironment
 import java.awt.SystemTray
+import kotlin.math.roundToInt
 
 /**
  * Phase 2: the tray icon and the flyout.
@@ -79,10 +81,11 @@ fun main(args: Array<String>) {
                     TrayIconRenderer
                         .render(
                             utilization = state.usage?.headline ?: 0.0,
-                            // The size the shell actually wants, so the bitmap is
-                            // drawn rather than resampled. Hardcoding 32 and
-                            // letting Windows shrink it is precisely the
-                            // muddiness TrayIconRenderer draws per-size to avoid.
+                            // The size the shell actually rasterises to, in real
+                            // pixels, so the bitmap is drawn rather than
+                            // resampled. Handing over a smaller one and letting
+                            // Windows stretch it is precisely the muddiness
+                            // TrayIconRenderer draws per-size to avoid.
                             size = trayIconSize(),
                             mode = TrayIconRenderer.Mode.RING_WITH_PERCENT,
                             stale = state.stale,
@@ -127,14 +130,25 @@ fun main(args: Array<String>) {
 }
 
 /**
- * The notification area's icon size, in pixels, as this machine reports it.
+ * The notification area's icon size, in **physical pixels**.
  *
- * AWT answers with the size the shell will display, which already accounts for
- * DPI — 16 at 100%, larger when scaled. Clamped because a hostile or absent
- * answer should degrade to a small clean icon rather than to something enormous.
+ * `SystemTray.trayIconSize` does not answer that. Measured on a 150% display it
+ * returns 16, the same as at 100%: the number is in AWT's scaled user space, not
+ * in pixels, while the shell rasterises the icon at 24. Rendering 16 and letting
+ * Windows stretch it to 24 is exactly the soft, smeared icon this app renders
+ * per size to avoid — and it also kept every scaled display below
+ * [TrayIconRenderer.PERCENT_THRESHOLD], so the ring silently lost its number on
+ * exactly the machines with room for it.
+ *
+ * Multiplying by the screen's scale factor is what recovers the real figure.
+ * Clamped because a hostile or absent answer should degrade to a small clean
+ * icon rather than to something enormous.
  */
 private fun trayIconSize(): Int = runCatching {
-    SystemTray.getSystemTray().trayIconSize.width
+    val logical = SystemTray.getSystemTray().trayIconSize.width
+    val scale = GraphicsEnvironment.getLocalGraphicsEnvironment()
+        .defaultScreenDevice.defaultConfiguration.defaultTransform.scaleX
+    (logical * scale).roundToInt()
 }.getOrDefault(16).coerceIn(16, 64)
 
 /**
