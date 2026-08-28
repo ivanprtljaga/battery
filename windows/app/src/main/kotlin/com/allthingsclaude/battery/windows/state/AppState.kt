@@ -62,23 +62,6 @@ class AppState(
     val sourceLabel: String get() = dir?.label ?: "No Claude Code directory"
 
     /**
-     * How tall the panel needs to be, in dp.
-     *
-     * Computed rather than fixed because the optional rows genuinely come and
-     * go: a burn rate needs several samples before it exists at all, and most
-     * accounts have no extra-usage credits. A window sized for the maximum
-     * leaves a third of itself empty on a first run, which reads as a broken
-     * layout rather than as an absent row.
-     */
-    val panelHeight: Int
-        get() {
-            var height = 196
-            usage?.projection?.let { height += 28 }
-            usage?.extra?.let { height += 22 }
-            return height
-        }
-
-    /**
      * True once a reading has gone stale — shown as a hollow tray ring rather
      * than a blanked one, because the last number is still the best answer
      * available and hiding it would be less honest than marking it old.

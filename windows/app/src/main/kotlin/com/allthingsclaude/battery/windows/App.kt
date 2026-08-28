@@ -5,6 +5,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.foundation.layout.width
@@ -20,6 +21,7 @@ import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.allthingsclaude.battery.windows.dev.renderScreenshots
 import com.allthingsclaude.battery.windows.state.AppState
+import com.allthingsclaude.battery.windows.tray.TrayAnchor
 import com.allthingsclaude.battery.windows.tray.TrayIconRenderer
 import com.allthingsclaude.battery.windows.ui.BatteryTheme
 import com.allthingsclaude.battery.windows.ui.Panel
@@ -113,9 +115,10 @@ fun main(args: Array<String>) {
                 // than the Linux default — a number that has to be right on
                 // every font at every DPI is a number that will be wrong.
                 size = DpSize.Unspecified,
-                // Anchored bottom-right, above the notification area, which is
-                // where a tray flyout belongs on Windows. Phase 4 replaces this
-                // with the real tray-icon rectangle from Shell_NotifyIconGetRect.
+                // A first guess only, so the window does not appear in the
+                // middle of the screen before it is placed. TrayAnchor moves it
+                // onto the real icon below, and this is what stands when there
+                // is no icon to anchor to.
                 position = WindowPosition.Aligned(Alignment.BottomEnd),
             ),
             undecorated = trayAvailable,
@@ -124,6 +127,28 @@ fun main(args: Array<String>) {
         ) {
             BatteryTheme {
                 Panel(state, Modifier.width(360.dp).wrapContentHeight())
+            }
+
+            // Compose sizes a `DpSize.Unspecified` window to its content exactly
+            // once, while the window is still undisplayable — so the first
+            // layout wins, and the first layout is the empty state, one line of
+            // "waiting for the first reading". When the reading arrives the
+            // panel grows three gauges taller and the window does not, which is
+            // the clipping this was meant to cure rather than a fixed height.
+            //
+            // So re-pack by hand whenever the panel changes shape. Clearing the
+            // preferred size first is the point: `pack()` alone would re-apply
+            // the frozen one.
+            //
+            // Then put the window on the icon. Deliberately after the pack, in
+            // that order — the flyout is anchored by its *bottom* edge, which is
+            // not known until the height is.
+            LaunchedEffect(state.usage == null, state.message, visible) {
+                if (!visible) return@LaunchedEffect
+                withFrameNanos { }
+                window.preferredSize = null
+                window.pack()
+                TrayAnchor.flyoutOrigin(window.size)?.let(window::setLocation)
             }
         }
     }

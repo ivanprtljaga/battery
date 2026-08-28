@@ -58,6 +58,17 @@ dependencies {
     // removed `compose.desktop.currentOS` accessor used to do.
     implementation("org.jetbrains.compose.desktop:desktop-jvm-$composeHostTarget:${libs.versions.compose.get()}")
 
+    // The Win32 calls the JDK does not expose. `Shell_NotifyIconGetRect` is the
+    // whole of it today: AWT can put an icon in the notification area but will
+    // not say where the shell put it, and a flyout that guesses is a flyout
+    // that lands in the wrong place on a centred or repositioned taskbar.
+    //
+    // Pure Java with a bundled native stub, so it does not change what jpackage
+    // has to ship. Phases 4 and 5 already have it on their list for
+    // ITaskbarList3 and the toast surface.
+    implementation(libs.jna)
+    implementation(libs.jna.platform)
+
     testImplementation(kotlin("test"))
 }
 

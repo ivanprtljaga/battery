@@ -9,6 +9,9 @@ kotlinxSerialization = "1.11.0"  # matches android/ — required, not optional: 
                                  # when this build compiles that module.
 compose = "1.12.0"               # Compose Multiplatform, newest stable, verified
                                  # building and running against Kotlin 2.4.10.
+jna = "5.19.1"                   # Win32 calls the JDK does not expose. Phase 2
+                                 # needs Shell_NotifyIconGetRect; Phase 4 needs
+                                 # ITaskbarList3 and the WinRT toast surface.
 
 [libraries]
 # Compose Multiplatform for the desktop. Declared by coordinate rather than via
@@ -17,6 +20,12 @@ compose = "1.12.0"               # Compose Multiplatform, newest stable, verifie
 compose-desktop = { group = "org.jetbrains.compose.desktop", name = "desktop-jvm", version.ref = "compose" }
 
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
+
+# `jna` is the FFI runtime; `jna-platform` is the generated Win32 binding layer
+# on top of it — User32, Kernel32 and the WinDef structs. Both are needed, and
+# their versions must match.
+jna = { group = "net.java.dev.jna", name = "jna", version.ref = "jna" }
+jna-platform = { group = "net.java.dev.jna", name = "jna-platform", version.ref = "jna" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
