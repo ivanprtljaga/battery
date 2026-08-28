@@ -453,7 +453,7 @@ produces the first rectangle needs Windows.
 
 **Phase 3 — local history. Done and verified against a live WSL install.**
 A seven-day chart and a project breakdown, read from Claude Code's own
-transcripts when the panel opens. 83 tests in `:app`.
+transcripts when the panel opens.
 
 Three things a real machine settled, none of which the plan had right.
 
@@ -524,8 +524,71 @@ panel; neither answers a question this one is being opened to ask.
 
 ---
 
-- [ ] **Phase 4 — toasts and taskbar.** WinRT toasts at the 80/90/95 thresholds,
-      `ITaskbarList3` overlay icon, both via JNA.
+**Phase 4 — toasts and the taskbar. Done, and it is smaller than the plan.**
+93 tests in `:app`. Both halves of this phase changed shape when a real machine
+was asked about them, and in both cases the answer was less code rather than
+more.
+
+**WinRT was not necessary.** The plan said toasts via JNA:
+`ToastNotificationManager`, `RoGetActivationFactory`, HSTRING marshalling, an
+`IInspectable` vtable walked by hand. `TrayIcon.displayMessage` produces a
+genuine Windows 11 toast — in the notification centre, with the system's own
+styling and dismiss affordances — because Windows routes `Shell_NotifyIcon`'s
+`NIF_INFO` into the modern notification system and AWT already speaks it. The
+delivery mechanism is one call and no native code at all.
+
+What *did* need a native call was the name on it. The first toast was headed
+**"OpenJDK Platform binary"** with a coffee-cup icon, because a notification is
+attributed to its process's AppUserModelID and an unregistered `java.exe` has
+the JDK's. `SetCurrentProcessExplicitAppUserModelID` fixes that, and its limit is
+worth writing down because it is a packaging fact rather than a notification one:
+with no Start Menu shortcut carrying the same ID, Windows has no display name or
+icon to resolve and shows the raw string. Measured, not assumed — the toast now
+reads `com.allthingsclaude.battery`. jpackage's `--win-menu` writes exactly that
+shortcut, so the friendly name and the terracotta icon arrive with Phase 5 and
+not with more Win32.
+
+**`ITaskbarList3` had the premise backwards.** The plan was an overlay badge on
+the app's taskbar button. Looking at a real taskbar found the button already
+there, wearing the Java Duke icon — and it should not exist. The flyout is a
+popup that appears when the tray icon is clicked and vanishes when you click
+away, so the button flickers in and out beside a tray icon that is already this
+app's presence on the taskbar. There is nothing to badge, and badging a button
+that should not be there is not an improvement. `WS_EX_TOOLWINDOW` removes it,
+and takes the flyout out of Alt-Tab too, which is the same correct answer to the
+same question. Compose's undecorated window has neither that flag nor an owner
+(`exStyle 0x00000008`), which is why it got one.
+
+**What is left is the decision, and that is the part worth having.**
+`ThresholdAlerts` ports `NotificationService.checkThresholds` and its
+neighbours — 80/90/95, said once, re-armed on the way down, debounced an hour so
+a figure hovering on a boundary is not an event — with this codebase's usual
+change to ported logic: it is pure, so all of it is tested. The macOS original
+is private state on a service that calls `UNUserNotificationCenter` inline, so
+none of its arithmetic is covered there. Interrupting someone twice for the same
+thing is the sort of bug nobody reports; they just turn notifications off.
+
+One deliberate departure. macOS fires every threshold crossed in a poll, so 78%
+to 91% produces two toasts stacked up describing the same moment. Here the lower
+ones are recorded as said without being said: the highest carries strictly more
+information, and one interruption is the quieter reading of "tell them when it
+matters".
+
+A tray tick turns the whole thing off. One switch rather than the three macOS
+offers, because the question people have is "stop talking to me" — and because
+the usual Windows answer, Settings › Notifications, does not list an unpackaged
+app whose AppUserModelID resolves to no Start Menu entry. Until Phase 5 registers
+one, this switch is the only one there is.
+
+Whether a toast actually reaches the notification centre is not a thing a test
+can answer, which is the same gap `--screenshot` fills for the panel:
+
+```
+gradlew :app:run --args="--toast"    # one sample alert, through the real path
+```
+
+---
+
 - [ ] **Phase 5 — ship.** `windows-release.yml` on `windows-latest`, jpackage
       MSI, `ReleaseFeed` reused unchanged for in-app updates, winget manifest.
 
@@ -538,6 +601,10 @@ easier; deferring it is part of what keeps Compose Desktop the right call.
 
 Written down rather than discovered later:
 
+- **The toast's display name and icon.** Setting the AppUserModelID gets the
+  JDK's branding off, and no further: a name and an icon need a Start Menu
+  shortcut carrying the same ID, which jpackage writes in Phase 5. Until then
+  the toast is headed `com.allthingsclaude.battery`, which is honest and ugly.
 - **Whether DWM actually honours the rounded corner.** Setting
   `DWMWA_WINDOW_CORNER_PREFERENCE` to `DWMWCP_ROUND` returns `S_OK` and reads
   back as `ROUND` on the development machine, and the compositor still draws the
