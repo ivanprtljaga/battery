@@ -6,6 +6,7 @@ import androidx.compose.runtime.setValue
 import com.allthingsclaude.battery.core.SessionHistory
 import com.allthingsclaude.battery.core.InMemorySnapshotStore
 import com.allthingsclaude.battery.core.PollBackoff
+import com.allthingsclaude.battery.core.SessionPolicy
 import com.allthingsclaude.battery.core.UsageApiError
 import com.allthingsclaude.battery.core.UsageBucket
 import com.allthingsclaude.battery.windows.auth.DirSelection
@@ -14,11 +15,16 @@ import com.allthingsclaude.battery.windows.config.ClaudeConfigDir
 import com.allthingsclaude.battery.windows.config.ClaudeDir
 import com.allthingsclaude.battery.windows.config.DirOrigin
 import com.allthingsclaude.battery.windows.config.SourcePreference
+import com.allthingsclaude.battery.windows.history.DayUsage
+import com.allthingsclaude.battery.windows.history.LocalHistory
+import com.allthingsclaude.battery.windows.history.LocalStats
+import com.allthingsclaude.battery.windows.history.ProjectUsage
 import com.allthingsclaude.battery.windows.poll.PollResult
 import com.allthingsclaude.battery.windows.poll.UsagePoller
 import com.allthingsclaude.battery.windows.wsl.Wsl
 import java.io.File
 import java.time.Instant
+import java.time.LocalDate
 
 /** Everything the panel and the tray draw from. */
 data class UiUsage(
@@ -57,7 +63,8 @@ class AppState(
     private val runningDistros: () -> List<String> = { Wsl.running() },
     private val candidates: () -> List<ClaudeDir> = { ClaudeConfigDir.candidates() },
     private val preferenceFile: File = SourcePreference.defaultFile(),
-    private val history: SessionHistory = SessionHistory(InMemorySnapshotStore()),
+    private val history: (ClaudeDir) -> LocalStats? = { LocalHistory.read(it) },
+    private val burnRate: SessionHistory = SessionHistory(InMemorySnapshotStore()),
 ) {
 
     /**
@@ -107,6 +114,33 @@ class AppState(
 
     private var lastRunning: List<String>? = null
 
+    /**
+     * The seven-day chart and the project breakdown, or null when they have not
+     * been read — which is the state behind a closed panel, and the state when
+     * the distro is down.
+     *
+     * Null rather than empty on purpose: "Ubuntu isn't running" and "you did
+     * nothing all week" are different statements, and only one of them should
+     * draw a flat chart.
+     */
+    var stats by mutableStateOf<LocalStats?>(null)
+        private set
+
+    /**
+     * Whether a Claude Code session is going right now.
+     *
+     * Inferred from the newest transcript write rather than from a hook, so
+     * there is nothing to install and it works on both installs at once. The
+     * threshold is `core`'s [com.allthingsclaude.battery.core.SessionPolicy.END_GRACE_SECONDS]
+     * — the shared definition of a session having ended — rather than a fresh
+     * number: a tighter one would blink off during a code review, and the other
+     * platforms already settled this argument.
+     */
+    val sessionActive: Boolean
+        get() = stats?.lastActivity?.let {
+            it.isAfter(Instant.now().minusSeconds(SessionPolicy.END_GRACE_SECONDS))
+        } ?: false
+
     /** "WSL: Ubuntu", or the reason there is nothing to read. */
     val sourceLabel: String get() = dir?.label ?: "No Claude Code directory"
 
@@ -154,10 +188,25 @@ class AppState(
         dir = source
         identity = readIdentity(source)
         usage = null
+        stats = null
         message = null
         healthy = false
         lastUpdated = null
         refresh()
+        loadHistory()
+    }
+
+    /**
+     * Read the local transcripts. Called when the panel opens, never on a timer.
+     *
+     * This is the one rule the macOS app does not need: a heat map recomputed
+     * behind a closed window costs a Mac some CPU and costs this app a 9P round
+     * trip into a virtual machine. Safe to call from a background thread, and it
+     * should be — it reads megabytes across a network redirector.
+     */
+    fun loadHistory() {
+        val target = dir ?: return
+        stats = runCatching { history(target) }.getOrNull()
     }
 
     /**
@@ -204,6 +253,18 @@ class AppState(
                 projection = "8.4% per hour",
                 extra = "Extra $20.80 of $40.00",
             )
+            stats = LocalStats(
+                days = listOf(180_000L, 940_000L, 520_000L, 2_100_000L, 1_400_000L, 0L, 760_000L)
+                    .mapIndexed { index, tokens ->
+                        DayUsage(LocalDate.now().minusDays((6 - index).toLong()), tokens)
+                    },
+                projects = listOf(
+                    ProjectUsage("battery", 3_600_000L),
+                    ProjectUsage("dotfiles", 1_240_000L),
+                    ProjectUsage("scratch", 88_000L),
+                ),
+                lastActivity = Instant.now().minusSeconds(90),
+            )
         }
     }
 
@@ -215,7 +276,7 @@ class AppState(
             is PollResult.Ok -> {
                 val response = result.usage
                 val projection = response.fiveHour?.let {
-                    history.record(it.utilization, it.resetsAt)
+                    burnRate.record(it.utilization, it.resetsAt)
                 }
                 usage = UiUsage(
                     session = response.fiveHour,

@@ -223,7 +223,14 @@ fun main(args: Array<String>) {
             // Then put the window on the icon. Deliberately after the pack, in
             // that order — the flyout is anchored by its *bottom* edge, which is
             // not known until the height is.
-            LaunchedEffect(state.usage == null, state.message, visible) {
+            // Panel-gated, which on Windows is not a nicety. Reading the
+            // transcripts means megabytes across 9P into a virtual machine, and
+            // nobody needs a seven-day chart recomputed behind a closed window.
+            LaunchedEffect(visible, state.dir) {
+                if (visible) withContext(Dispatchers.IO) { state.loadHistory() }
+            }
+
+            LaunchedEffect(state.usage == null, state.message, state.stats, visible) {
                 if (!visible) return@LaunchedEffect
                 withFrameNanos { }
                 window.preferredSize = null

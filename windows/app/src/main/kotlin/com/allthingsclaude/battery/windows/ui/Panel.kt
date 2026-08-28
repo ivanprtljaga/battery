@@ -17,6 +17,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -31,9 +33,11 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.ui.text.TextStyle
 import com.allthingsclaude.battery.core.UsageBucket
 import com.allthingsclaude.battery.core.UsageLevel
+import com.allthingsclaude.battery.windows.history.LocalStats
 import com.allthingsclaude.battery.windows.state.AppState
 import com.allthingsclaude.battery.windows.state.UiUsage
 import java.time.Instant
+import java.util.Locale
 
 /**
  * The one text primitive this panel uses.
@@ -112,8 +116,137 @@ fun Panel(
                     Text(it, color = palette.secondary, fontSize = 12.sp)
                 }
             }
+
+            // Absent until the panel opens and reads it, and absent again when
+            // the distro is down — so the flyout is exactly as tall as what it
+            // has to say, which is what packing to content bought.
+            state.stats?.let {
+                Spacer(Modifier.height(18.dp))
+                LocalActivity(it)
+            }
         }
     }
+}
+
+/** The seven-day chart and the project breakdown, under one heading. */
+@Composable
+private fun LocalActivity(stats: LocalStats) {
+    val palette = LocalBatteryPalette.current
+
+    Divider()
+    Spacer(Modifier.height(14.dp))
+    Text("Last 7 days", color = palette.onSurface, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+    Spacer(Modifier.height(10.dp))
+    DayChart(stats)
+
+    if (stats.projects.isNotEmpty()) {
+        Spacer(Modifier.height(14.dp))
+        val busiest = stats.projects.first().tokens.coerceAtLeast(1L)
+        stats.projects.forEach { project ->
+            ProjectRow(project.name, project.tokens, project.tokens.toFloat() / busiest)
+            Spacer(Modifier.height(6.dp))
+        }
+    }
+}
+
+@Composable
+private fun Divider() {
+    val palette = LocalBatteryPalette.current
+    Canvas(Modifier.fillMaxWidth().height(1.dp)) {
+        drawRect(palette.secondary.copy(alpha = 0.22f))
+    }
+}
+
+/**
+ * Seven bars and their weekday initials.
+ *
+ * Scaled against the busiest day rather than against a fixed ceiling: the useful
+ * question is which day was heavy relative to the others, and a plan's absolute
+ * token budget is not something this chart knows or should imply.
+ */
+@Composable
+private fun DayChart(stats: LocalStats) {
+    val palette = LocalBatteryPalette.current
+    val busiest = stats.busiestDay
+    val today = stats.days.lastOrNull()?.date
+
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.Bottom,
+    ) {
+        stats.days.forEach { day ->
+            val fraction = if (busiest > 0) day.tokens.toFloat() / busiest else 0f
+            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                Canvas(Modifier.width(BAR_WIDTH).height(CHART_HEIGHT)) {
+                    val radius = CornerRadius(size.width / 2f, size.width / 2f)
+                    // The track, always full height, so an idle day reads as an
+                    // empty column rather than as a missing one.
+                    drawRoundRect(palette.brand.copy(alpha = 0.14f), cornerRadius = radius)
+                    if (fraction > 0f) {
+                        // A floor of one bar-width: a day with a handful of
+                        // tokens is not the same as a day with none, and
+                        // rounding it away would say it was.
+                        val filled = maxOf(size.height * fraction, size.width)
+                        drawRoundRect(
+                            color = palette.brand,
+                            topLeft = Offset(0f, size.height - filled),
+                            size = Size(size.width, filled),
+                            cornerRadius = radius,
+                        )
+                    }
+                }
+                Spacer(Modifier.height(5.dp))
+                Text(
+                    day.date.dayOfWeek.getDisplayName(java.time.format.TextStyle.NARROW, Locale.getDefault()),
+                    color = if (day.date == today) palette.onSurface else palette.secondary,
+                    fontSize = 10.sp,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProjectRow(name: String, tokens: Long, fraction: Float) {
+    val palette = LocalBatteryPalette.current
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(name, color = palette.onSurface, fontSize = 11.sp)
+        Spacer(Modifier.weight(1f))
+        Text(compactTokens(tokens), color = palette.secondary, fontSize = 11.sp)
+        Spacer(Modifier.width(10.dp))
+        Canvas(Modifier.width(120.dp).height(6.dp)) {
+            val radius = CornerRadius(size.height / 2f, size.height / 2f)
+            drawRoundRect(palette.brand.copy(alpha = 0.14f), cornerRadius = radius)
+            drawRoundRect(
+                color = palette.brand,
+                size = Size(
+                    // Never thinner than it is tall, so the smallest project is
+                    // still a dot rather than a sliver of nothing.
+                    maxOf(size.width * fraction.coerceIn(0f, 1f), size.height),
+                    size.height,
+                ),
+                cornerRadius = radius,
+            )
+        }
+    }
+}
+
+/** The seven-day chart's bars: tall and narrow, so it reads as a chart. */
+private val CHART_HEIGHT = 40.dp
+private val BAR_WIDTH = 14.dp
+
+/**
+ * Token counts, shortened.
+ *
+ * A cache-heavy session runs to millions, and eight digits in an 11 sp row is
+ * noise — the comparison between rows is the point, and the bar already carries
+ * it.
+ */
+internal fun compactTokens(tokens: Long): String = when {
+    tokens >= 1_000_000 -> "%.1fM".format(tokens / 1_000_000.0)
+    tokens >= 1_000 -> "%.0fK".format(tokens / 1_000.0)
+    else -> tokens.toString()
 }
 
 @Composable
