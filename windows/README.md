@@ -314,7 +314,8 @@ do. `UsagePoller` calls `requestUsage` only; when a token goes stale the answer
 is to re-read Claude Code's file, never to rotate its chain.
 **Phase 2 — tray and flyout. Done, and now verified in a real notification
 area.** Compose Multiplatform 1.12.0 against Kotlin 2.4.10, confirmed building
-and running rather than assumed. 63 tests in `:app`, alongside `core`'s 118.
+and running rather than assumed. 42 tests in `:app` at the time, alongside
+`core`'s 118.
 
 ```
 gradlew :app:run                                     # tray icon; click for the panel
@@ -449,11 +450,80 @@ the icon or below it depending on which side the work area is — which is what
 makes a top or side taskbar work without a special case. The geometry is a pure
 function of two rectangles and a size, so all of it is tested; only the call that
 produces the first rectangle needs Windows.
-- [ ] **Phase 3 — local history.** Panel-gated reads of `stats-cache.json`,
-      `projects/` and `history.jsonl`; streak, heat map, seven-day chart, project
-      breakdown. A polling watcher, and `battery-hook.sh` writing its session
-      marker to a `/mnt/c/...` path so hot-session detection never depends on
-      watching ext4 from Win32.
+
+**Phase 3 — local history. Done and verified against a live WSL install.**
+A seven-day chart and a project breakdown, read from Claude Code's own
+transcripts when the panel opens. 83 tests in `:app`.
+
+Three things a real machine settled, none of which the plan had right.
+
+**Nothing can watch these files.** `ReadDirectoryChangesW` was expected to fail
+over 9P. It fails *silently*, which is worse and changes the design rather than
+confirming it:
+
+```
+ReadDirectoryChangesW armed: True     <- no error, no exception
+events seen: 0                        <- write from inside the distro
+events after a Windows-side write: 0  <- control: written from Windows
+mtime changed:  True
+size changed:   True (6 -> 49)
+```
+
+The control row is the one that matters. A change made from the *Windows* side
+of the same share raises nothing either, so this is not "Linux-side writes do
+not reach the notification channel" — the 9P redirector implements no change
+notifications at all. And `EnableRaisingEvents = true` succeeds, so the obvious
+design — try a watcher, fall back to polling if it fails — would never fall
+back. Polling is not the fallback here. It is the mechanism.
+
+**`stats-cache.json` does not exist.** Not on the WSL install, not on the native
+one. `StatsCacheService.swift` treats it as the primary source and the JSONL as
+a supplement; here the supplement is the whole story, which deletes a tier of
+the macOS design rather than porting it. `history.jsonl` is 27 prompts with no
+token counts — macOS calls it a "recovery source of last resort" and that is
+exactly what it is worth.
+
+**`cwd` is per message, and it wanders.** The obvious way to attribute tokens to
+a project is the `cwd` on each line. One real session logged 224 messages at
+`…/battery`, 63 at `…/battery/windows` and 3 at `…/battery/android` — one piece
+of work, split three ways and ranked by where somebody happened to be standing.
+The panel showed `battery`, `windows` and `android` as three projects, which is
+how the bug was found: it looked wrong before it could be reasoned about.
+
+The stable identity is the transcript's *folder*, which is Claude Code's own
+notion of a project and fixed for the session. The folder name is only the path
+with separators replaced by dashes, so it cannot be decoded without ambiguity
+(`my-app` is indistinguishable from `my/app`) — so the shallowest `cwd` observed
+in that folder is preferred as the name, since every wandered path is below the
+session root. `StatsCacheService.displayName(forPath:)` ports as it stands for
+the rest, plus five leaf names this repo earns: its own tree is `android/`,
+`ios/`, `windows/`, and a row reading "windows" names nothing.
+
+**What it costs.** Measured over 9P rather than guessed: 2.1 MB of transcript
+reads in 68 ms, a stat pass over the tree takes 8. So the shape is stat
+everything, discard anything older than the window, open only what survives —
+and do all of it when the panel opens, never on the poll timer. A seven-day
+chart recomputed behind a closed window costs a Mac some CPU and costs this app
+a round trip into a virtual machine.
+
+**One gate, one definition.** Local history is the second thing to read a
+`\\wsl.localhost` path, and a second private copy of the rule whose failure mode
+is "silently boots a virtual machine" is not a duplication worth having.
+`Wsl.reachable` is now that rule, in one place; `CredentialBridge` asks it too.
+
+**Hot sessions without a hook.** The plan was `battery-hook.sh` writing a marker
+to `/mnt/c/...`. Inferring it from the newest transcript write needs no hook, no
+edit to anybody's `settings.json`, and works on both installs at once. The
+threshold is `core`'s `SessionPolicy.END_GRACE_SECONDS` rather than a fresh
+number — the other platforms already argued about what "still working" means,
+and thirty minutes of not burning tokens is a code review, not the end of a
+session.
+
+Deliberately not built: the streak and the heat map. Both are in the macOS
+panel; neither answers a question this one is being opened to ask.
+
+---
+
 - [ ] **Phase 4 — toasts and taskbar.** WinRT toasts at the 80/90/95 thresholds,
       `ITaskbarList3` overlay icon, both via JNA.
 - [ ] **Phase 5 — ship.** `windows-release.yml` on `windows-latest`, jpackage
@@ -468,9 +538,6 @@ easier; deferring it is part of what keeps Compose Desktop the right call.
 
 Written down rather than discovered later:
 
-- **Whether `ReadDirectoryChangesW` sees ext4 changes through 9P.** Expected to
-  fail, which is why Phase 3 plans for polling. Cheap to settle, and it decides
-  the session-detection design.
 - **Whether DWM actually honours the rounded corner.** Setting
   `DWMWA_WINDOW_CORNER_PREFERENCE` to `DWMWCP_ROUND` returns `S_OK` and reads
   back as `ROUND` on the development machine, and the compositor still draws the
