@@ -22,8 +22,8 @@ Everything below follows from that one fact.
 | ![The panel, dark](../assets/windows-panel.png) | ![The panel, light](../assets/windows-panel-light.png) |
 
 Rendered by `--screenshot`, which draws the panel through the same Skia path a
-real window uses — so these are the actual rendering, not a mockup, and they were
-produced on Linux without opening a window.
+real window uses — so these are the actual rendering, not a mockup, and no window
+is opened to produce them.
 
 ---
 
@@ -53,6 +53,33 @@ credential file is touched every few hours rather than every minute.
 **Gate local history on the panel.** Streaks, the heat map, the seven-day chart
 and the project breakdown are read when the panel opens, not on a timer. Nobody
 needs a heat map recomputed behind a closed window.
+
+### The probe is side-effect free. Demonstrated, not assumed.
+
+The first of those three rules is the one the other two rest on, and until now it
+had never actually been tested. Ubuntu was running throughout Phase 1, so the
+probe had only ever been asked about a distro that was already up — which cannot
+distinguish *does not start one* from *did not need to*. Settling it needs a
+second distro that is definitely down, so one was installed and never launched:
+
+    wsl --install -d Debian --no-launch
+
+| | |
+|:--|:--|
+| `wsl -l --running -q`, five times | Debian stays **Stopped**, and is correctly absent from the output |
+| Reading `\\wsl.localhost\Debian\etc\os-release` | Debian goes **Running** |
+| `wsl --terminate Debian`, then three more probes | Debian stays **Stopped** |
+
+The middle row is the control, and it is what makes the other two mean anything:
+the same machine, seconds apart, does start the distro the moment something
+touches its filesystem. The probe is therefore quiet by demonstration rather than
+by absence of evidence, and it is quiet both for a distro that has never run and
+for one that has been terminated.
+
+The control also sharpens the rule above it. That path read **failed** — a distro
+with no user account yet answers 9P with an I/O error — and the distro booted
+anyway. It is naming the path that starts the VM, not reading it successfully, so
+there is no such thing as a cheap failed attempt.
 
 ## `.liveUnavailable` stops being an edge case
 
@@ -248,9 +275,9 @@ UTF-8. `WslCommand` splits `run` from `exec` for exactly this reason — decodin
 token close to expiry, and refreshing is the one thing a bridged client must not
 do. `UsagePoller` calls `requestUsage` only; when a token goes stale the answer
 is to re-read Claude Code's file, never to rotate its chain.
-**Phase 2 — tray and flyout. Done; rendered and verified, but not yet on
-Windows.** Compose Multiplatform 1.12.0 against Kotlin 2.4.10, confirmed
-building and running rather than assumed. 36 tests.
+**Phase 2 — tray and flyout. Done, and now verified in a real notification
+area.** Compose Multiplatform 1.12.0 against Kotlin 2.4.10, confirmed building
+and running rather than assumed. 47 tests in `:app`, alongside `core`'s 118.
 
 ```
 gradlew :app:run                                     # tray icon; click for the panel
@@ -266,7 +293,7 @@ laying out a string; here the same choice becomes three *pictures* —
 asks for. Java2D rather than Compose: the shell wants a `BufferedImage` at an
 exact pixel count, which is what Java2D is for and what a composable is not. Each
 of 16/20/24/32 is drawn at its own size; rendering one and letting the shell
-scale it is what makes a tray icon look muddy. At 16 px the combined ring-plus-
+scale it is what makes a tray icon look muddy. Below 24 px the combined ring-plus-
 number mode drops the number rather than draw a smudge, which is a test rather
 than a hope.
 
@@ -283,6 +310,73 @@ foundation is the whole requirement. Every colour comes from `core`'s
 `--screenshot` renders the panel through the same Skia path a real window uses,
 via `ImageComposeScene`, so a layout can be reviewed without Windows, a
 credential, or a display. That is how both themes above were checked.
+
+### What seeing it settled
+
+Everything above was true of a rendering. Four things were not true of a window,
+and none of them could have been found without one.
+
+**`SystemTray.trayIconSize` is not a pixel count.** On a 150% display it answers
+16 — the same as at 100% — because the figure is in AWT's scaled user space,
+while the shell rasterises the icon at 24. So the app drew a 16 px bitmap and let
+Windows stretch it, which is precisely the muddiness `TrayIconRenderer` draws per
+size to avoid, and it is invisible in a PNG because the PNG is the crisp original.
+It also held every scaled display below the threshold at which the combined mode
+draws its number, so the icon silently lost the percentage on exactly the
+machines with room for it. Multiplying by the screen's scale factor is the fix.
+Compose is not at fault and behaves well: its `Tray` asks the painter for 16 dp
+at the current density, so a bitmap of the right size arrives one-to-one.
+
+**A percentage inside a ring needs 24 px, not 20.** Judged against a real
+taskbar with both in front of each other. At 20 the two digits sit in about eight
+pixels of ring interior and anti-alias into a smudge that reads as a dirty icon
+rather than as a number — worse than the clean ring it replaces. At 24 they
+resolve. The ring alone stays right at 16: the mode that carries a legible number
+in a 16 px box is `PERCENT`, where the digits get the whole icon instead of the
+hole in the middle of a gauge, and that is the answer for anyone who wants a
+number at 100% scaling.
+
+**Compose packs a size-`Unspecified` window exactly once**, while it is still
+undisplayable — `if (!isDisplayable) { setPreferredSize(...); pack() }`, and never
+again. So the first layout wins, and the first layout is the empty state: one
+line of "waiting for the first reading". When the reading arrived the panel grew
+three gauges taller and the window did not, which is the same clipping the fixed
+height used to cause, arriving by a different route. The window has to be
+re-packed by hand whenever the panel changes shape, and the frozen preferred size
+cleared first or `pack()` simply re-applies it.
+
+**The icon opened on a double click.** Compose's `onAction` is AWT's `TrayIcon`
+ActionListener, and on Windows that fires on the second click. Every native
+flyout in the notification area opens on the first one, so the icon looked dead
+to anyone who clicked it the way Windows taught them — and a tray app whose icon
+does nothing is indistinguishable from a tray app that has crashed. There is no
+Compose hook, so the listener goes onto the AWT icon directly, reached through
+`SystemTray.trayIcons`.
+
+### Where the flyout lands
+
+`WindowPosition.Aligned(BottomEnd)` was always a placeholder, and Windows 11 is
+the version that makes it wrong rather than merely crude: the taskbar is centred
+by default, so the notification area is nowhere near the corner the flyout was
+anchoring to. `Shell_NotifyIconGetRect` answers the question directly — it
+returns the screen rectangle of one specific icon, and the overflow chevron's
+rectangle when that icon is hidden behind it, which is the case a corner guess
+has no way to handle at all.
+
+The awkward part is naming *our* icon, because the call takes the `(hWnd, uID)`
+pair the owner passed to `Shell_NotifyIcon` and `java.awt.TrayIcon` exposes
+neither. Both are recovered from outside: AWT's owner is a top-level window of
+class `SunAwtTrayIcon` in this process, and the `uID` is found by offering the
+shell the first few candidates and keeping the one it recognises — it answers
+`S_OK` for an icon it knows and an error for anything else, which makes it a
+lookup rather than a guess. On this machine that is `uID = 1`, and the rectangle
+it returned matched the icon's measured position on screen exactly.
+
+The panel is then centred on that rectangle and clamped into the work area, above
+the icon or below it depending on which side the work area is — which is what
+makes a top or side taskbar work without a special case. The geometry is a pure
+function of two rectangles and a size, so all of it is tested; only the call that
+produces the first rectangle needs Windows.
 - [ ] **Phase 3 — local history.** Panel-gated reads of `stats-cache.json`,
       `projects/` and `history.jsonl`; streak, heat map, seven-day chart, project
       breakdown. A polling watcher, and `battery-hook.sh` writing its session
@@ -302,19 +396,20 @@ easier; deferring it is part of what keeps Compose Desktop the right call.
 
 Written down rather than discovered later:
 
-- **The tray icon has never been seen in a notification area.** It is unit
-  tested and rendered to PNG, which says nothing about whether 16 px is legible
-  at a real DPI, or where the flyout lands. Phase 2's panel is verified as a
-  *rendering*; it is not verified as a *window*.
-
-- **Compose Multiplatform 1.12.0 against Kotlin 2.4.10.** Both are the newest
-  stable of each, resolved from live Maven metadata; their mutual compatibility
-  is unconfirmed. Nothing applies the plugin until Phase 2.
 - **Whether `ReadDirectoryChangesW` sees ext4 changes through 9P.** Expected to
   fail, which is why Phase 3 plans for polling. Cheap to settle, and it decides
   the session-detection design.
-- **Whether `wsl.exe -l --running -q` is side-effect free on a *stopped*
-  distro.** The command works and its output format is now pinned, but it has
-  only ever been run while the distro was already up — which cannot distinguish
-  "does not start one" from "did not need to". The entire no-boot strategy rests
-  on this, and settling it needs a second, shut-down distro.
+- **Every DPI other than 150%.** The scale factor is read from the screen rather
+  than assumed, so 100% and 200% should follow, but only 150% has been in front
+  of anyone. 100% is the interesting one: it is the case where the tray icon
+  drops to a bare 16 px ring.
+- **A taskbar anywhere but the bottom.** `TrayAnchor` handles a top or side
+  taskbar and the geometry is tested, but the tested part is the arithmetic —
+  what `Shell_NotifyIconGetRect` returns for a vertical taskbar, and for an icon
+  sitting inside an *open* overflow flyout, has not been seen.
+- **A second monitor at a different scale factor.** `TrayAnchor` picks the
+  screen by asking each device to read the icon rectangle with its own scale
+  factor, which is exact for a monitor whose desktop origin is the origin — so
+  the primary one, which is where a taskbar with a notification area normally
+  is. A tray on a secondary monitor at a different scale would need the real
+  mapping rather than this one.
