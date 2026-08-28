@@ -1,5 +1,7 @@
 package com.allthingsclaude.battery.windows.wsl
 
+import com.allthingsclaude.battery.windows.config.ClaudeDir
+import com.allthingsclaude.battery.windows.config.DirOrigin
 import java.nio.charset.StandardCharsets
 
 /**
@@ -87,6 +89,24 @@ object Wsl {
     /** Every installed distro, running or not. For the folder picker only. */
     fun installed(command: WslCommand = RealWslCommand): List<String> =
         parseDistroList(command.run("-l", "-q"))
+
+    /**
+     * Whether [dir]'s path may be touched at all, right now.
+     *
+     * The single statement of this app's central rule, so that every reader
+     * asks the same question in the same words. It used to live inside
+     * `CredentialBridge.read`, which was correct for as long as the credential
+     * was the only thing being read; local history is a second reader, and a
+     * second private copy of a rule whose failure mode is "silently boots a
+     * virtual machine" is not a duplication worth having.
+     *
+     * A native or explicit directory is always reachable. A WSL one is
+     * reachable only while its distro is up — and the check has to come before
+     * the path is *named*, because merely stat-ing a `\wsl.localhost` path is
+     * what starts the distro.
+     */
+    fun reachable(dir: ClaudeDir, command: WslCommand = RealWslCommand): Boolean =
+        dir.origin != DirOrigin.WSL || (dir.distro != null && dir.distro in running(command))
 
     /**
      * Split from the process call so the format is pinned by a test rather than

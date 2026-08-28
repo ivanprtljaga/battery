@@ -102,14 +102,11 @@ object CredentialBridge {
         },
         nowMillis: Long = System.currentTimeMillis(),
     ): CredentialLookup {
-        if (dir.origin == DirOrigin.WSL) {
-            val distro = dir.distro
-            if (distro == null || distro !in Wsl.running(command)) {
-                return CredentialLookup.Unavailable(
-                    CredentialLookup.Reason.DISTRO_NOT_RUNNING,
-                    distro,
-                )
-            }
+        if (!Wsl.reachable(dir, command)) {
+            return CredentialLookup.Unavailable(
+                CredentialLookup.Reason.DISTRO_NOT_RUNNING,
+                dir.distro,
+            )
         }
 
         val path = ClaudeConfigDir.credentialsFile(dir.path)
