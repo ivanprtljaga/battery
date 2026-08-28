@@ -140,6 +140,42 @@ windows/
   core/    → ../android/core, mounted in place, never edited from here
 ```
 
+## What a real Windows run settled
+
+Phase 1 was built on a Linux JVM and first run on Windows afterwards. Everything
+platform-specific worked unmodified, which is worth recording because none of it
+could be tested where it was written:
+
+```
+WSL distros running: Ubuntu
+
+Windows: C:\Users\Ivan\.claude
+  identity: [redacted]
+  token:    Claude Code isn't signed in here [FILE_MISSING]
+
+WSL: Ubuntu: \\wsl.localhost\Ubuntu\home\ivan\.claude
+  identity: [redacted]
+  token:    valid for 6h 24m
+```
+
+`RealWslCommand` against a real `wsl.exe`, `%USERPROFILE%` resolution, the UNC
+spelling, `whoami` resolving the Linux user through the UTF-8 path while the
+distro list came back UTF-16LE, `.claude.json` found *beside* the directory on
+both sides, and the credential read across 9P — all first time.
+
+It also found a bug that only a machine with two directories could have found.
+The native install had been signed in once: it keeps a `.claude.json`, so it
+looks valid and reports an identity, but holds no credential. Both the poller and
+the panel took the first candidate, and `candidates()` orders by *cost* — native
+first, because it needs no distro probe. So the app blocked on an empty directory
+while a token with six hours left sat one line below it. Cost is the right order
+to offer directories in and the wrong one to choose from; [`DirSelection`] now
+draws that distinction, and the case is a test.
+
+One cosmetic thing the same run exposed: the Windows console runs a legacy code
+page, so every em dash in this app's output arrived as `?`. The `run` task now
+sets `stdout.encoding`.
+
 ## Running it on Windows
 
 Needs a JDK 17 or newer — Gradle itself needs a JVM to start, so this is the one
@@ -259,13 +295,10 @@ easier; deferring it is part of what keeps Compose Desktop the right call.
 
 Written down rather than discovered later:
 
-- **None of this has run on Windows.** Phases 0 and 1 were built and verified on
-  a Linux JVM against a local `--dir`. That exercises the parsing, the gating
-  logic and the API path, and it exercises *none* of what makes this a Windows
-  port: `%USERPROFILE%` resolution, UNC path spelling, whether a `\\wsl.localhost`
-  read behaves as expected, or `RealWslCommand` against a real `wsl.exe`. The
-  seams are all injected, so this is a question of integration rather than of
-  design — but it is unanswered.
+- **The tray icon has never been seen in a notification area.** It is unit
+  tested and rendered to PNG, which says nothing about whether 16 px is legible
+  at a real DPI, or where the flyout lands. Phase 2's panel is verified as a
+  *rendering*; it is not verified as a *window*.
 
 - **Compose Multiplatform 1.12.0 against Kotlin 2.4.10.** Both are the newest
   stable of each, resolved from live Maven metadata; their mutual compatibility

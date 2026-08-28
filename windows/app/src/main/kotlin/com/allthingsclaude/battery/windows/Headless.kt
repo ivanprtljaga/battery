@@ -4,6 +4,7 @@ import com.allthingsclaude.battery.core.UsageBucket
 import com.allthingsclaude.battery.core.UsageLevel
 import com.allthingsclaude.battery.windows.auth.CredentialBridge
 import com.allthingsclaude.battery.windows.auth.CredentialLookup
+import com.allthingsclaude.battery.windows.auth.DirSelection
 import com.allthingsclaude.battery.windows.auth.TokenCache
 import com.allthingsclaude.battery.windows.config.ClaudeConfigDir
 import com.allthingsclaude.battery.windows.config.ClaudeDir
@@ -46,7 +47,7 @@ fun runHeadless(args: Array<String>) {
         // caller has named a path they can already reach. This is the headless
         // stand-in for the macOS folder picker, and the only way to exercise
         // this code on a machine that is not Windows.
-        listOf(ClaudeDir(ClaudeConfigDir.normalize(explicit), DirOrigin.WINDOWS_NATIVE))
+        listOf(ClaudeDir(ClaudeConfigDir.normalize(explicit), DirOrigin.EXPLICIT))
     } else {
         ClaudeConfigDir.candidates()
     }
@@ -64,12 +65,15 @@ fun runHeadless(args: Array<String>) {
         report(dir)
     }
 
-    val target = dirs.first()
+    // The first directory that can actually answer, which is not always the
+    // first one listed — a signed-out native install outranks a live WSL one by
+    // cost alone. See DirSelection.
+    val target = DirSelection.pick(dirs) ?: dirs.first()
     val poller = UsagePoller(cache = TokenCache())
 
     do {
         println()
-        println("[${Instant.now()}] polling ${target.label}")
+        println("[${Instant.now()}] polling ${target.label} — ${target.path}")
         when (val result = poller.poll(target)) {
             is PollResult.Ok -> printUsage(result)
             is PollResult.Blocked -> println("  blocked: ${result.lookup.message}")

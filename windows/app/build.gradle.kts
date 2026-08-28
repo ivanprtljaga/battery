@@ -65,6 +65,14 @@ application {
     mainClass.set("com.allthingsclaude.battery.windows.AppKt")
 }
 
+tasks.named<JavaExec>("run") {
+    // The Windows console runs a legacy code page, so anything outside it —
+    // every em dash in this app's output — arrives as `?`. Observed on a real
+    // run. These two properties are JDK 19+ and set the console streams
+    // specifically; `file.encoding` alone does not cover stdout.
+    jvmArgs("-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8")
+}
+
 tasks.test {
     useJUnitPlatform()
     testLogging { events("failed") }

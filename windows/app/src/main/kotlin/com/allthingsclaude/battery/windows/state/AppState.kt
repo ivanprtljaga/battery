@@ -6,6 +6,7 @@ import androidx.compose.runtime.setValue
 import com.allthingsclaude.battery.core.SessionHistory
 import com.allthingsclaude.battery.core.InMemorySnapshotStore
 import com.allthingsclaude.battery.core.UsageBucket
+import com.allthingsclaude.battery.windows.auth.DirSelection
 import com.allthingsclaude.battery.windows.auth.TokenCache
 import com.allthingsclaude.battery.windows.config.ClaudeConfigDir
 import com.allthingsclaude.battery.windows.config.ClaudeDir
@@ -92,7 +93,9 @@ class AppState(
                 com.allthingsclaude.battery.windows.config.DirOrigin.EXPLICIT,
             )
         } else {
-            ClaudeConfigDir.candidates().firstOrNull()
+            // Not `.first()`: the cheapest candidate is not necessarily the one
+            // that can answer. See DirSelection.
+            DirSelection.pick(ClaudeConfigDir.candidates())
         }
         identity = dir?.let { readIdentity(it) }
         if (dir == null) message = "No Claude Code directory found"
