@@ -67,12 +67,11 @@ private fun Text(
  * all carry meaning that is already settled.
  */
 @Composable
-fun Panel(state: AppState) {
+fun Panel(state: AppState, modifier: Modifier = Modifier.fillMaxSize()) {
     val palette = LocalBatteryPalette.current
 
     Box(
-        Modifier
-            .fillMaxSize()
+        modifier
             .clip(RoundedCornerShape(12.dp))
             .background(palette.surface),
     ) {

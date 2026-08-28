@@ -172,6 +172,13 @@ while a token with six hours left sat one line below it. Cost is the right order
 to offer directories in and the wrong one to choose from; [`DirSelection`] now
 draws that distinction, and the case is a test.
 
+**A tray-only first run is invisible.** Windows hides a new notification-area
+icon behind the overflow chevron, and nothing may promote it out of there except
+the user dragging it — so `gradlew :app:run` with no arguments looked exactly
+like a hang, when in fact the app was running fine and Gradle was simply waiting
+for it to exit. macOS has no equivalent problem, a menu bar item is just there.
+So the app now shows its panel on the very first launch, and only then.
+
 One cosmetic thing the same run exposed: the Windows console runs a legacy code
 page, so every em dash in this app's output arrived as `?`. The `run` task now
 sets `stdout.encoding`.

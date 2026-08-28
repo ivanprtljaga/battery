@@ -7,6 +7,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.toComposeImageBitmap
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Alignment
@@ -57,7 +60,7 @@ fun main(args: Array<String>) {
     // app usable and, more to the point, keeps the panel reviewable somewhere
     // other than Windows.
     val trayAvailable = runCatching { SystemTray.isSupported() }.getOrDefault(false)
-    val startVisible = args.contains("--panel") || !trayAvailable
+    val startVisible = args.contains("--panel") || !trayAvailable || claimFirstRun()
 
     application {
         val state = remember { AppState().also { it.resolve(explicit) } }
@@ -76,7 +79,11 @@ fun main(args: Array<String>) {
                     TrayIconRenderer
                         .render(
                             utilization = state.usage?.headline ?: 0.0,
-                            size = 32,
+                            // The size the shell actually wants, so the bitmap is
+                            // drawn rather than resampled. Hardcoding 32 and
+                            // letting Windows shrink it is precisely the
+                            // muddiness TrayIconRenderer draws per-size to avoid.
+                            size = trayIconSize(),
                             mode = TrayIconRenderer.Mode.RING_WITH_PERCENT,
                             stale = state.stale,
                         )
@@ -97,7 +104,12 @@ fun main(args: Array<String>) {
             visible = visible,
             title = "Battery",
             state = rememberWindowState(
-                size = DpSize(360.dp, state.panelHeight.dp),
+                // Unspecified so the window packs around its content.
+                // A fixed height was measured against one machine's fonts and
+                // clipped the reset labels on Windows, where Segoe UI is taller
+                // than the Linux default — a number that has to be right on
+                // every font at every DPI is a number that will be wrong.
+                size = DpSize.Unspecified,
                 // Anchored bottom-right, above the notification area, which is
                 // where a tray flyout belongs on Windows. Phase 4 replaces this
                 // with the real tray-icon rectangle from Shell_NotifyIconGetRect.
@@ -107,9 +119,52 @@ fun main(args: Array<String>) {
             resizable = false,
             alwaysOnTop = trayAvailable,
         ) {
-            BatteryTheme { Panel(state) }
+            BatteryTheme {
+                Panel(state, Modifier.width(360.dp).wrapContentHeight())
+            }
         }
     }
+}
+
+/**
+ * The notification area's icon size, in pixels, as this machine reports it.
+ *
+ * AWT answers with the size the shell will display, which already accounts for
+ * DPI — 16 at 100%, larger when scaled. Clamped because a hostile or absent
+ * answer should degrade to a small clean icon rather than to something enormous.
+ */
+private fun trayIconSize(): Int = runCatching {
+    SystemTray.getSystemTray().trayIconSize.width
+}.getOrDefault(16).coerceIn(16, 64)
+
+/**
+ * Whether this is the first launch, marking it seen as a side effect.
+ *
+ * **Windows hides a new notification-area icon behind the overflow chevron.**
+ * There is no supported way to promote your own icon out of it — only the user
+ * dragging it onto the taskbar — so a first run that starts minimised to the
+ * tray is, from the user's side, an app that did nothing at all. Observed on a
+ * real machine, where the run looked like a hang.
+ *
+ * macOS has no equivalent problem: a menu bar item is simply there. So this is
+ * one of the few places the Windows app must behave differently from its
+ * sibling rather than the same.
+ *
+ * A failure to read or write the marker returns false — showing the panel is the
+ * recoverable mistake, and an unwritable home directory should not mean a window
+ * on every single launch.
+ */
+private fun claimFirstRun(): Boolean = try {
+    val marker = java.io.File(System.getProperty("user.home"), ".battery/windows-seen")
+    if (marker.exists()) {
+        false
+    } else {
+        marker.parentFile?.mkdirs()
+        marker.writeText(java.time.Instant.now().toString())
+        true
+    }
+} catch (_: Exception) {
+    false
 }
 
 /**
