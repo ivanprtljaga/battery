@@ -31,12 +31,19 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.ui.text.TextStyle
+import com.allthingsclaude.battery.core.TimeFormatting
 import com.allthingsclaude.battery.core.UsageBucket
 import com.allthingsclaude.battery.core.UsageLevel
 import com.allthingsclaude.battery.windows.history.LocalStats
 import com.allthingsclaude.battery.windows.state.AppState
 import com.allthingsclaude.battery.windows.state.UiUsage
 import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
+// Aliased: `androidx.compose.ui.text.TextStyle` above owns the short name here.
+import java.time.format.TextStyle as DayNameStyle
+import java.time.temporal.ChronoUnit
 import java.util.Locale
 
 /**
@@ -198,7 +205,7 @@ private fun DayChart(stats: LocalStats) {
                 }
                 Spacer(Modifier.height(5.dp))
                 Text(
-                    day.date.dayOfWeek.getDisplayName(java.time.format.TextStyle.NARROW, Locale.getDefault()),
+                    day.date.dayOfWeek.getDisplayName(DayNameStyle.NARROW, Locale.getDefault()),
                     color = if (day.date == today) palette.onSurface else palette.secondary,
                     fontSize = 10.sp,
                 )
@@ -356,16 +363,60 @@ private fun Gauge(label: String, bucket: UsageBucket, modifier: Modifier = Modif
     }
 }
 
-/** Port of the countdown label. Coarse on purpose — a ticking second hand in a
- *  tray flyout is noise, and the window this measures is five hours long. */
-internal fun resetsIn(at: Instant?, now: Instant = Instant.now()): String {
+/**
+ * When a window resets: a countdown for the near ones, a clock time for the rest.
+ *
+ * A five-hour session is a countdown — "4h 37m" is exactly how long you have and
+ * exactly what you want to know. A seven-day window is not: "123h 47m" is a
+ * number nobody converts, and it was on screen for as long as this panel has
+ * existed. `core`'s [TimeFormatting.untilReset] exists because the same defect
+ * showed up on Apple ("153h 0m") and it renders `5d 3h`, which is readable but
+ * still arithmetic — you can't plan around it without doing a sum.
+ *
+ * So past a day this says *when*, not *how long*: "Wed 19:00". That is the
+ * answer to the question actually being asked, and it is the shape iOS already
+ * uses — `TimeFormatting` deliberately refuses it only because a shared,
+ * fixture-pinned formatter cannot carry a time zone or a locale. A desktop panel
+ * has both.
+ *
+ * Coarse below a day on purpose: a ticking second hand in a tray flyout is noise.
+ */
+internal fun resetsIn(
+    at: Instant?,
+    now: Instant = Instant.now(),
+    zone: ZoneId = ZoneId.systemDefault(),
+    // FORMAT, not `Locale.getDefault()`. Windows keeps the display language and
+    // the regional format apart, and the JVM mirrors that split — on the machine
+    // this was written on they are `en_US` and `sr_RS_#Latn`, so the plain
+    // default renders "7:00 PM" beside a taskbar clock reading 19:00. FORMAT is
+    // the one that means "how this person writes times".
+    locale: Locale = Locale.getDefault(Locale.Category.FORMAT),
+): String {
     if (at == null) return "—"
     val seconds = at.epochSecond - now.epochSecond
     if (seconds <= 0) return "resetting"
-    val hours = seconds / 3600
-    val minutes = (seconds % 3600) / 60
-    return if (hours > 0) "${hours}h ${minutes}m" else "${minutes}m"
+
+    // `core`'s formatter, not a second opinion about what "4h 37m" looks like.
+    // It is pinned by fixtures/time-formatting.json across all four platforms.
+    if (seconds < DAY_SECONDS) return TimeFormatting.shortDuration(seconds.toDouble())
+
+    val reset = at.atZone(zone)
+    val clock = reset.format(DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT).withLocale(locale))
+    val daysAway = ChronoUnit.DAYS.between(now.atZone(zone).toLocalDate(), reset.toLocalDate())
+    return if (daysAway <= 6) {
+        // Inside a week a weekday names the day unambiguously, and it is what
+        // people say out loud. Abbreviated because this sits under a gauge in a
+        // three-column row: "Wednesday" is wider than the column.
+        "${reset.dayOfWeek.getDisplayName(DayNameStyle.SHORT, locale)} $clock"
+    } else {
+        // Seven days out the weekday has come round again and would name two
+        // different days. A weekly window never gets here; a plan with a longer
+        // one would.
+        reset.format(DateTimeFormatter.ofPattern("d MMM", locale)) + " $clock"
+    }
 }
+
+private const val DAY_SECONDS = 24 * 60 * 60L
 
 @Suppress("unused")
 private fun Modifier.unusedWidth() = this.width(0.dp)
