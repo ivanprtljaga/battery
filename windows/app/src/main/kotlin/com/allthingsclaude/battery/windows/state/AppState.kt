@@ -6,6 +6,7 @@ import androidx.compose.runtime.setValue
 import com.allthingsclaude.battery.core.SessionHistory
 import com.allthingsclaude.battery.core.InMemorySnapshotStore
 import com.allthingsclaude.battery.core.PollBackoff
+import com.allthingsclaude.battery.core.ProfileApi
 import com.allthingsclaude.battery.core.SessionPolicy
 import com.allthingsclaude.battery.core.UsageApiError
 import com.allthingsclaude.battery.core.UsageBucket
@@ -102,6 +103,18 @@ class AppState(
     var message by mutableStateOf<String?>(null)
         private set
     var identity by mutableStateOf<String?>(null)
+        private set
+
+    /**
+     * "Max 5x", "Pro", or empty when the tier cannot be said.
+     *
+     * Read from `.claude.json` rather than from `/api/oauth/profile`: the field
+     * is already in a file this app opens, so the badge costs no request and has
+     * no failure mode. The *label* is still `core`'s, because the mapping has a
+     * trap — `default_claude_max_20x` contains "max", so a naive check calls a
+     * 20x plan "Max" — and that trap is already solved and tested there.
+     */
+    var plan by mutableStateOf("")
         private set
 
     /** What [configStamp] said when [identity] was last read. */
@@ -304,6 +317,9 @@ class AppState(
         }.getOrNull()?.let { ClaudeConfigDir.identity(it) }
 
         identity = account?.let { it.email ?: it.accountUuid }
+        plan = account?.rateLimitTier
+            ?.let { ProfileApi.Profile(email = null, displayName = null, rateLimitTier = it).planLabel }
+            .orEmpty()
     }
 
     companion object {
@@ -324,6 +340,7 @@ class AppState(
          */
         fun preview(): AppState = AppState().apply {
             identity = "someone@example.com"
+            plan = "Max 5x"
             healthy = true
             usage = UiUsage(
                 session = UsageBucket(63.0, Instant.now().plusSeconds(46 * 60)),

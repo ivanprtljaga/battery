@@ -321,12 +321,18 @@ private fun Header(state: AppState) {
     val palette = LocalBatteryPalette.current
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
-            Text(
-                state.identity ?: "Battery",
-                color = palette.onSurface,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    state.identity ?: "Battery",
+                    color = palette.onSurface,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+                if (state.plan.isNotEmpty()) {
+                    Spacer(Modifier.width(8.dp))
+                    PlanBadge(state.plan)
+                }
+            }
             Text(
                 state.sourceLabel,
                 color = palette.secondary,
@@ -334,6 +340,26 @@ private fun Header(state: AppState) {
             )
         }
         StatusDot(state.healthy)
+    }
+}
+
+/**
+ * "Max 5x" beside the account, the way the macOS popover carries it.
+ *
+ * Absent rather than blank when the tier cannot be read: an empty capsule beside
+ * a name reads as a rendering fault, which is exactly what the equivalent badge
+ * looked like on Android before `ProfileApi` was given the right source.
+ */
+@Composable
+private fun PlanBadge(plan: String) {
+    val palette = LocalBatteryPalette.current
+    Box(
+        Modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(palette.brand.copy(alpha = 0.16f))
+            .padding(horizontal = 6.dp, vertical = 1.dp),
+    ) {
+        Text(plan, color = palette.brand, fontSize = 10.sp, fontWeight = FontWeight.Medium)
     }
 }
 
