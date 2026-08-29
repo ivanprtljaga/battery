@@ -522,6 +522,10 @@ session.
 Deliberately not built: the streak and the heat map. Both are in the macOS
 panel; neither answers a question this one is being opened to ask.
 
+The section collapses, which is macOS's `showDetails` switch gating the same
+content. It earns more here: with it closed the read does not happen at all, and
+the read is megabytes across a 9P redirector into a virtual machine.
+
 ---
 
 **Phase 4 — toasts and the taskbar. Done, and it is smaller than the plan.**
@@ -689,6 +693,59 @@ The Windows 11 Widgets board — the analogue of the Glance widgets and the iOS
 Home Screen widgets — is deliberately **not** in this list. It needs MSIX and a
 COM server, and it is the one surface where a C#/WinUI port would have been
 easier; deferring it is part of what keeps Compose Desktop the right call.
+
+## What this port does not have
+
+The macOS app is the reference and this is not all of it. Written down as a list
+rather than discovered one disappointment at a time.
+
+**Accounts.** macOS has `Account`, `AccountManager`, `OAuthService` and an
+account-tab strip: several accounts, each with its own tokens, added by signing
+in to Battery itself over OAuth PKCE. None of that is here, and the omission is
+structural rather than unfinished. This app is a **bridge**: it reads Claude
+Code's credential and never holds one of its own, because the refresh token is
+deliberately withheld and rotating a single-use chain shared with another program
+strands whichever copy loses. Adding a Battery-owned account means adding the
+token store that `UsagePoller` is written to avoid.
+
+What exists instead is a *source* switch — native or WSL — and it doubles as
+account switching exactly when the two installs are signed in as different
+people, because the identity comes from each directory's own `.claude.json`.
+Signed into the same account on both, as is usual, switching source changes the
+five-hour window and not the account.
+
+**A settings window.** macOS has `SettingsView` and about ten preferences. This
+app has two tick boxes in the tray menu and a collapsible section. Specifically
+missing:
+
+| macOS setting | here |
+|:--|:--|
+| `colorTheme` | absent — the panel is always dark. `BatteryTheme` renders light and `--screenshot` proves it; nothing switches it, and nothing follows the Windows app-mode setting. |
+| `menuBarDisplayMode`, `showMenuBarText` | absent. `TrayIconRenderer.Mode` draws all three, and the app hardcodes `RING_WITH_PERCENT`. |
+| `showPercentageRemaining` | absent — always used, never remaining. |
+| `showTimeSinceReset` | absent — always time until reset, never elapsed. |
+| `pollIntervalActive` / `pollIntervalIdle` | absent — a fixed sixty seconds, and `PollBackoff` on failure. There is no idle cadence, so the app polls at the same rate whether or not anybody is working. |
+| `launchAtLogin` | absent, and the most visible of these: after a reboot the app is not running until it is started from the Start Menu. |
+| `dataRetentionDays` | not applicable — see below. |
+
+**A database.** macOS has `DatabaseService` and keeps snapshots across launches.
+This app uses `InMemorySnapshotStore`, so the burn-rate projection — the
+"8.4% per hour" line — starts from nothing on every start and needs several polls
+before it says anything. Nothing else depends on history surviving a restart, and
+the seven-day chart is read from Claude Code's transcripts rather than from
+anything this app stores, so the gap is narrower than it sounds.
+
+**The streak and the heat map.** `StatsView` on macOS. Deliberately not built —
+neither answers a question this panel is opened to ask.
+
+**A plan-tier badge.** macOS shows Max/Pro beside the title. `ProfileApi` in
+`core` can supply it and nothing here calls it. Worth noting that Windows'
+`.claude.json` carries `userRateLimitTier` and friends locally, so this is
+cheaper here than on macOS.
+
+**Closing on focus loss.** The flyout stays up until it is clicked away from the
+tray icon or closed. Windows' own flyouts dismiss when they lose focus, which
+this now has the focus handling to support and does not do.
 
 ## Unverified
 
