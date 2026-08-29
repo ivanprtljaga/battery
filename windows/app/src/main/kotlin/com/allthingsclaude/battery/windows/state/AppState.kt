@@ -98,6 +98,22 @@ class AppState(
      */
     private val backoff = PollBackoff()
 
+    /**
+     * Consecutive successful polls that found the same figure as the one before.
+     *
+     * The idle cadence macOS spells `pollIntervalIdle`. The obvious signal here
+     * would be [sessionActive] — but that is read from the transcripts, and the
+     * transcripts are read when the panel opens, so behind a closed window it is
+     * always false and would mean "idle" for someone typing.
+     *
+     * The figure itself is the honest proxy and costs nothing: a five-hour
+     * window whose utilisation has not moved is a window nobody is spending.
+     * Asking every minute about a number that is not changing is the polling
+     * this removes.
+     */
+    private var unchangedPolls = 0
+    private var lastHeadline: Double? = null
+
     var dir by mutableStateOf<ClaudeDir?>(null)
         private set
     var usage by mutableStateOf<UiUsage?>(null)
@@ -407,6 +423,30 @@ class AppState(
         const val POLL_SECONDS = 60L
 
         /**
+         * The slowest the loop goes while the figure is not moving.
+         *
+         * Five minutes, reached after [IDLE_AFTER] unchanged polls. A five-hour
+         * window measured every five minutes is still a hundredth of its length,
+         * and the moment anything changes the loop is back to a minute.
+         */
+        const val IDLE_MAX_SECONDS = 300L
+
+        /**
+         * How many identical readings before slowing down. Three, so a pause to
+         * read a diff does not immediately cost resolution — the point is the
+         * hours nobody is working, not the minutes between prompts.
+         */
+        const val IDLE_AFTER = 3
+
+        /** 60s, then 120, 180, 240, 300 and no further. */
+        internal fun idleCadence(unchangedPolls: Int): Long =
+            if (unchangedPolls < IDLE_AFTER) {
+                POLL_SECONDS
+            } else {
+                minOf(POLL_SECONDS * (unchangedPolls - IDLE_AFTER + 2), IDLE_MAX_SECONDS)
+            }
+
+        /**
          * Fixed figures, for offscreen rendering when there is no account to
          * read — so a layout can be reviewed without a credential, a network, or
          * a Windows machine.
@@ -464,7 +504,18 @@ class AppState(
                 healthy = true
                 lastUpdated = Instant.now()
                 backoff.recordSuccess()
-                nextPollSeconds = POLL_SECONDS
+
+                // Back off while nothing moves, and snap back the instant it
+                // does — an idle cadence that took a minute to notice work
+                // starting would be worse than no idle cadence.
+                val headline = usage?.headline
+                unchangedPolls = if (headline != null && headline == lastHeadline) {
+                    unchangedPolls + 1
+                } else {
+                    0
+                }
+                lastHeadline = headline
+                nextPollSeconds = idleCadence(unchangedPolls)
 
                 // The session window only. The weekly one moves too slowly for a
                 // threshold to mean "act now", and it is what the panel is for.
@@ -488,6 +539,9 @@ class AppState(
             is PollResult.Blocked -> {
                 message = result.lookup.message
                 healthy = false
+                // Nothing was asked of the API, so nothing about the cadence
+                // has been learned. The base rate is the honest answer, and it
+                // is also the one that notices a distro coming back soonest.
                 nextPollSeconds = POLL_SECONDS
             }
             is PollResult.Failed -> {
