@@ -1,6 +1,7 @@
 package com.allthingsclaude.battery.windows
 
 import com.allthingsclaude.battery.windows.config.ClaudeConfigDir
+import com.allthingsclaude.battery.windows.config.ClaudeDir
 import com.allthingsclaude.battery.windows.config.DirOrigin
 import com.allthingsclaude.battery.windows.wsl.WslCommand
 import kotlin.test.Test
@@ -129,7 +130,7 @@ class ClaudeConfigDirTest {
             command = command,
             env = env(),
             linuxUserFor = { "ivan" },
-            exists = { true },
+            siblings = { home -> listOf("$home\\.claude") },
         )
         assertEquals(1, dirs.size)
         assertEquals("Ubuntu", dirs.single().distro)
@@ -145,7 +146,55 @@ class ClaudeConfigDirTest {
             env = env("USERPROFILE" to "C:\\Users\\Ivan"),
             linuxUserFor = { "ivan" },
             exists = { false },
+            siblings = { emptyList() },
         )
         assertTrue(dirs.isEmpty())
+    }
+
+    /**
+     * A second account is a second config directory beside the first — which is
+     * how `CLAUDE_CONFIG_DIR` works. Looking only at the hardcoded `.claude`
+     * made a signed-in work account invisible.
+     */
+    @Test
+    fun `every config directory in a home is offered, not just the default`() {
+        val dirs = ClaudeConfigDir.candidates(
+            command = object : WslCommand {
+                override fun run(vararg args: String): String = "Ubuntu\r\n"
+            },
+            env = env(),
+            linuxUserFor = { "ivan" },
+            siblings = { home -> listOf("$home\\.claude", "$home\\.claude-work") },
+        )
+
+        assertEquals(2, dirs.size)
+        assertEquals(
+            listOf("WSL: Ubuntu", "WSL: Ubuntu (work)"),
+            dirs.map { it.label },
+            "two directories in one distro have to be tellable apart",
+        )
+    }
+
+    @Test
+    fun `the qualifier is whatever is not dot-claude`() {
+        fun label(path: String) = ClaudeDir(path, DirOrigin.WSL, "Ubuntu").label
+        assertEquals("WSL: Ubuntu", label("\\\\wsl.localhost\\Ubuntu\\home\\ivan\\.claude"))
+        assertEquals("WSL: Ubuntu (work)", label("\\\\wsl.localhost\\Ubuntu\\home\\ivan\\.claude-work"))
+        assertEquals("WSL: Ubuntu (personal)", label("\\\\wsl.localhost\\Ubuntu\\home\\ivan\\.claude_personal"))
+    }
+
+    /** An explicit CLAUDE_CONFIG_DIR names one directory and means it. */
+    @Test
+    fun `an explicit config dir is taken alone, not enumerated around`() {
+        val dirs = ClaudeConfigDir.candidates(
+            command = object : WslCommand {
+                override fun run(vararg args: String): String = ""
+            },
+            env = env("CLAUDE_CONFIG_DIR" to "D:\\claude", "USERPROFILE" to "C:\\Users\\Ivan"),
+            linuxUserFor = { null },
+            exists = { true },
+            siblings = { error("must not enumerate when the variable names a directory") },
+        )
+        assertEquals(listOf("D:\\claude"), dirs.map { it.path })
     }
 }

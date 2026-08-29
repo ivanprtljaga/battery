@@ -145,7 +145,13 @@ fun main(args: Array<String>) {
                         // Compose throws rather than approximating one.
                         state.sources.forEach { source ->
                             CheckboxItem(
-                                text = source.label,
+                                // The account, not just the location: two config
+                                // directories in one distro both read
+                                // "WSL: Ubuntu", and the thing being chosen
+                                // between is whose usage to show.
+                                text = state.accountFor(source)
+                                    ?.let { "${source.label} — $it" }
+                                    ?: source.label,
                                 checked = state.dir?.path == source.path,
                                 onCheckedChange = { wanted ->
                                     // Unticking the active source would leave the

@@ -14,6 +14,7 @@ import com.allthingsclaude.battery.windows.auth.DirSelection
 import com.allthingsclaude.battery.windows.auth.TokenCache
 import com.allthingsclaude.battery.windows.config.ClaudeConfigDir
 import com.allthingsclaude.battery.windows.config.ClaudeDir
+import com.allthingsclaude.battery.windows.config.ClaudeIdentity
 import com.allthingsclaude.battery.windows.config.DirOrigin
 import com.allthingsclaude.battery.windows.config.Flags
 import com.allthingsclaude.battery.windows.config.SourcePreference
@@ -146,6 +147,23 @@ class AppState(
         private set
 
     private var lastRunning: List<String>? = null
+
+    /**
+     * Who each candidate directory belongs to, for the Source menu.
+     *
+     * Two config directories in one distro — `.claude` and `.claude-work` — both
+     * read "WSL: Ubuntu", and a menu that names neither is worse than no menu.
+     * The account is the thing being chosen between, so the menu says it.
+     *
+     * One small file read per candidate, and only when the running distros
+     * change. The path is already gated by then: a directory is a candidate
+     * because [ClaudeConfigDir.candidates] found it, which for WSL means the
+     * distro was up.
+     */
+    private var accounts by mutableStateOf<Map<String, String>>(emptyMap())
+
+    /** The account a source belongs to, or null when it cannot be read. */
+    fun accountFor(dir: ClaudeDir): String? = accounts[dir.path]
 
     /**
      * Whether threshold toasts are allowed, read once and remembered.
@@ -294,7 +312,19 @@ class AppState(
         if (running == lastRunning && sources.isNotEmpty()) return
         lastRunning = running
         sources = runCatching { candidates() }.getOrDefault(emptyList())
+        accounts = sources.mapNotNull { candidate ->
+            readAccount(candidate)?.let { account ->
+                // The organisation when there is one, because that is what
+                // distinguishes a work install at a glance; the address
+                // otherwise.
+                candidate.path to (account.organizationName ?: account.email ?: account.accountUuid)
+            }
+        }.toMap()
     }
+
+    private fun readAccount(dir: ClaudeDir): ClaudeIdentity? = runCatching {
+        File(ClaudeConfigDir.onThisPlatform(ClaudeConfigDir.configFile(dir.path))).readText()
+    }.getOrNull()?.let { ClaudeConfigDir.identity(it) }
 
     /**
      * Re-read who this directory belongs to, but only when the file has moved.
@@ -312,10 +342,7 @@ class AppState(
     }
 
     private fun applyIdentity(dir: ClaudeDir) {
-        val account = runCatching {
-            File(ClaudeConfigDir.onThisPlatform(ClaudeConfigDir.configFile(dir.path))).readText()
-        }.getOrNull()?.let { ClaudeConfigDir.identity(it) }
-
+        val account = readAccount(dir)
         identity = account?.let { it.email ?: it.accountUuid }
         plan = account?.rateLimitTier
             ?.let { ProfileApi.Profile(email = null, displayName = null, rateLimitTier = it).planLabel }
