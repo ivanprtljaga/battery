@@ -778,8 +778,8 @@ What is missing is only seeing both at the same time. Two accounts means two
 tokens, two five-hour windows and two sets of gauges, and this panel draws one.
 
 **Most of macOS's settings.** It has `SettingsView` and about ten preferences.
-This app has two tick boxes in the tray menu and a collapsible section.
-Specifically missing:
+This app has a `Source` submenu, two tick boxes and a collapsible section, all in
+the tray menu. Specifically missing:
 
 | macOS setting | here |
 |:--|:--|
@@ -838,6 +838,12 @@ point to reconsider — not before.
 
 Written down rather than discovered later:
 
+- **Nothing runs these tests on a push.** `ci.yml` is the macOS build and
+  `android-ci.yml` the Android one; neither looks at `windows/`, and the only
+  workflow that runs `gradlew test` here is the release, on a `windows-v*` tag.
+  So 120 tests currently guard a release and nothing else — a broken commit
+  stays green until somebody cuts a version. A `windows-ci.yml` on push and pull
+  request is the obvious fix and is not written.
 - **`windows-release.yml` has never run.** No `windows-v*` tag exists, so the
   workflow is reasoned from `android-release.yml` and from a packaging run on one
   machine. The steps most likely to be wrong are the ones a local build cannot
