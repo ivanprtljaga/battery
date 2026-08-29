@@ -314,10 +314,13 @@ class AppState(
         sources = runCatching { candidates() }.getOrDefault(emptyList())
         accounts = sources.mapNotNull { candidate ->
             readAccount(candidate)?.let { account ->
-                // The organisation when there is one, because that is what
-                // distinguishes a work install at a glance; the address
-                // otherwise.
-                candidate.path to (account.organizationName ?: account.email ?: account.accountUuid)
+                // The address, not the organisation. A personal account still
+                // has an organisation and Claude Code names it after the
+                // address — "someone@example.com's Organization" — so
+                // preferring it makes the personal rows long and the work row
+                // short, for no information. An address distinguishes every
+                // case, including two work accounts in one company.
+                candidate.path to (account.email ?: account.organizationName ?: account.accountUuid)
             }
         }.toMap()
     }

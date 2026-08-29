@@ -161,8 +161,12 @@ fun main(args: Array<String>) {
                                 // directories in one distro both read
                                 // "WSL: Ubuntu", and the thing being chosen
                                 // between is whose usage to show.
+                                // A hyphen, not an em dash. AWT's menus draw
+                                // with a font that has no glyph for U+2014 and
+                                // renders it as a box — seen in the menu, not
+                                // guessed at.
                                 text = state.accountFor(source)
-                                    ?.let { "${source.label} — $it" }
+                                    ?.let { "${source.label} - $it" }
                                     ?: source.label,
                                 checked = state.dir?.path == source.path,
                                 onCheckedChange = { wanted ->
