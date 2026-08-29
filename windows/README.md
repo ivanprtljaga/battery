@@ -802,21 +802,32 @@ anything this app stores, so the gap is narrower than it sounds.
 **The streak and the heat map.** `StatsView` on macOS. Deliberately not built —
 neither answers a question this panel is opened to ask.
 
-**AWT does not scale a menu for DPI either.** The same finding as the tray
-icon, in the same shape, found the same way — by looking at it. `win.menu.font`
-reports `Segoe UI 12`, the 96-DPI pixel size of the system's 9 pt menu font, and
-AWT then draws it at 12 *physical* pixels: on a 150% display the app's context
-menu came out two thirds the size of every other menu on the machine, and would
-have come out half at 200%. Multiplying by the screen's scale factor is the
-correction `trayIconSize` already makes, and the result matches a native menu
-rather than merely being larger.
+**AWT does not scale a menu for DPI either — and matching the metric is still
+wrong.** Two findings, and the second one only shows up once the first is fixed.
 
-Re-applied on every recomposition, because Compose rebuilds the items as the
-source list and the tick states change and a new item arrives at the peer's
-default size. Item height follows the font, which is where the vertical
-breathing room comes from; horizontal padding is not adjustable — `MenuItem` has
-no insets and the peer draws with the shell's margins. More than that would mean
-not using an AWT menu at all.
+`win.menu.font` reports `Segoe UI 12`, the 96-DPI size, and AWT draws it at 12
+*physical* pixels: the same under-scaling the tray icon had. Windows' own answer,
+from `SPI_GETNONCLIENTMETRICS`, is `lfMenuFont` with `lfHeight = -18` at 144 DPI
+— so multiplying by the scale factor is exactly right, and 18 is the shell's own
+number rather than a guess.
+
+At which point the menu is *too big*, which is not a contradiction. `lfMenuFont`
+describes a **classic Win32 menu**, the only kind AWT can draw. The menus a
+Windows 11 user actually sees are XAML flyouts with a smaller type ramp and much
+more padding — measured on the same machine, ink 16 px against our 17.5, and a
+third-party tray menu at 14. So the size sits deliberately below the metric, to
+match the menus beside it rather than the specification. That is a taste
+decision and is labelled as one in the code; the scaling underneath it is not.
+
+Horizontal padding is the part AWT will not give: `MenuItem` has no insets and
+the peer draws with fixed margins, so a modern flyout's left column is bought
+with leading spaces in the label — 6 px of indent became 37. Ugly and visible,
+and the alternative is not using an AWT menu at all.
+
+Two things only opening it could have found: the separator is not a kind of item
+but a `MenuItem` labelled exactly `"-"`, so indenting it turned both rules into
+rows reading "-"; and the restyle has to run on every recomposition, because
+Compose rebuilds the items as the source list and tick states change.
 
 **A settings window.** Not planned. Four switches live in the tray menu and one
 is the section heading itself; a window to hold them would be more chrome than
