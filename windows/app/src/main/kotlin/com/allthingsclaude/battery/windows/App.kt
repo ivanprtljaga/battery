@@ -82,6 +82,14 @@ fun main(args: Array<String>) {
         }
         var visible by remember { mutableStateOf(startVisible) }
 
+        // When focus loss last dismissed the panel.
+        //
+        // Clicking the tray icon while the panel is open does two things at
+        // once: the shell takes focus, which dismisses it, and then the click
+        // arrives and toggles it — straight back open. So a toggle that lands in
+        // the moment after a dismissal is that same click, and is ignored.
+        var dismissedAt by remember { mutableStateOf(0L) }
+
         // Whether the single-click listener below made it onto the AWT icon.
         // Until it does, the double click is the only way in, so `onAction` has
         // to keep working — and stop working the moment it would double up.
@@ -190,9 +198,9 @@ fun main(args: Array<String>) {
             DisposableEffect(Unit) {
                 val listener = object : MouseAdapter() {
                     override fun mouseReleased(event: MouseEvent) {
-                        if (event.button == MouseEvent.BUTTON1 && event.clickCount == 1) {
-                            visible = !visible
-                        }
+                        if (event.button != MouseEvent.BUTTON1 || event.clickCount != 1) return
+                        if (System.currentTimeMillis() - dismissedAt < DISMISS_GRACE_MILLIS) return
+                        visible = !visible
                     }
                 }
                 val icons = runCatching { SystemTray.getSystemTray().trayIcons }
@@ -272,6 +280,26 @@ fun main(args: Array<String>) {
                 window.requestFocus()
             }
 
+            // Dismiss when it loses focus, which is what a flyout is.
+            //
+            // Every native one does it — the clock, the volume, the network — and
+            // without it this panel stays on top of whatever the user clicked
+            // next, which is the one behaviour an always-on-top window must not
+            // have. Only meaningful with a tray icon to reopen it from; the WSLg
+            // fallback window is the app's only surface and closing it on focus
+            // loss would leave nothing.
+            DisposableEffect(trayAvailable) {
+                val listener = object : java.awt.event.WindowAdapter() {
+                    override fun windowLostFocus(event: java.awt.event.WindowEvent) {
+                        if (!trayAvailable) return
+                        dismissedAt = System.currentTimeMillis()
+                        visible = false
+                    }
+                }
+                window.addWindowFocusListener(listener)
+                onDispose { window.removeWindowFocusListener(listener) }
+            }
+
             // Windows 11 rounds a framed window on its own and leaves an
             // undecorated one square, so this has to be asked for. Once is
             // enough — it is a property of the window, not of the frame.
@@ -287,6 +315,16 @@ fun main(args: Array<String>) {
         }
     }
 }
+
+/**
+ * How long after a focus-loss dismissal a tray click is treated as the cause of
+ * it rather than as a fresh request to open.
+ *
+ * Long enough to cover the gap between the shell taking focus and the mouse
+ * release reaching AWT, short enough that a deliberate second click still
+ * reopens the panel.
+ */
+private const val DISMISS_GRACE_MILLIS = 250L
 
 /**
  * The notification area's icon size, in **physical pixels**.
