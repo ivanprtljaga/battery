@@ -132,6 +132,38 @@ A pin also outranks the candidate list when it is *absent* from it. Falling back
 to the other install would answer with a different session window under a label
 the user did not choose, which is worse than saying nothing.
 
+### A second account is a second directory
+
+The `Source` menu was built for one duality — native or WSL — and a work
+account is a different one. Claude Code's own answer is `CLAUDE_CONFIG_DIR`: a
+complete second install at `~/.claude-work`, in the same home, in the same
+distro, with its own credential, its own `projects/` and its own `.claude.json`
+*inside* it rather than beside it.
+
+The WSL path was hardcoded to `.claude`, so that install was invisible. It is
+now an enumeration of `.claude*` in each home, filtered by `looksValid` so a
+stray `.claude-backup` is a name rather than an offer. The listing is one
+directory read, and for a WSL home only for a distro `Wsl.running` has already
+named — the same gate as everything else here.
+
+Two of them in one distro both read "WSL: Ubuntu", so the part of the name that
+is not `.claude` becomes a qualifier, and the menu carries the account rather
+than the path:
+
+```
+Windows — ivanprtljaga.dev@gmail.com
+WSL: Ubuntu — ivanprtljaga.dev@gmail.com
+WSL: Ubuntu (work) — Advancedbytez
+```
+
+The organisation when there is one, because that is what identifies a work
+install at a glance; the address otherwise. Reading it costs one small file per
+candidate, and only when the running distros change.
+
+An explicit `CLAUDE_CONFIG_DIR` in the Windows environment still names one
+directory and means it — enumerating around it would be second-guessing
+somebody who has already been specific.
+
 ## What Windows-native Claude Code does
 
 Probed on a real install rather than assumed, the way `ClaudeConfigDir` pins
@@ -751,14 +783,14 @@ Specifically missing:
 
 | macOS setting | here |
 |:--|:--|
-| `colorTheme` | absent — the panel is always dark. `BatteryTheme` renders light and `--screenshot` proves it; nothing switches it, and nothing follows the Windows app-mode setting. |
+| `colorTheme` | **done, without the setting.** The panel follows `AppsUseLightTheme` — Windows' own "default app mode" — read once at start. Not `SystemUsesLightTheme`, which is the taskbar and Start, and which is why one can be dark while the other is light. |
 | `menuBarDisplayMode`, `showMenuBarText` | absent. `TrayIconRenderer.Mode` draws all three, and the app hardcodes `RING_WITH_PERCENT`. |
 | `showPercentageRemaining` | absent — always used, never remaining. |
 | `showTimeSinceReset` | absent — always time until reset, never elapsed. |
 | `pollIntervalActive` / `pollIntervalIdle` | absent — a fixed sixty seconds, and `PollBackoff` on failure. There is no idle cadence, so the app polls at the same rate whether or not anybody is working. |
-| `launchAtLogin` | absent, and the most visible of these: after a reboot the app is not running until it is started from the Start Menu. |
+| `launchAtLogin` | **done.** `HKCU\...\CurrentVersion\Run`, which is per-user like the installer, needs no administrator, and is what Task Manager's Startup tab reads — so turning it off there is seen here, because the state is queried rather than remembered. Never verified across an actual reboot. |
 | `dataRetentionDays` | not applicable — see below. |
-| `launchAtLogin` is the one worth having | the rest are parity for its own sake. |
+
 
 **A database.** macOS has `DatabaseService` and keeps snapshots across launches.
 This app uses `InMemorySnapshotStore`, so the burn-rate projection — the
@@ -786,6 +818,10 @@ Written down rather than discovered later:
   checkout, and whether the MSI lands where `Collect artifact` looks for it.
 - **The winget manifests have never been submitted.** They are templates with a
   version and a hash to fill in; the first submission is also the first review.
+- **Starting with Windows, across a real reboot.** The registry value is
+  written and read back, and Task Manager lists it. Whether the app actually
+  comes up at login — and whether it comes up before or after WSL is ready,
+  which decides what the first poll sees — has not been watched happen.
 - **The updater has never seen a real release.** `WindowsRelease` is tested
   against fixture pages, which pins the paging and the four-way answer, and says
   nothing about what GitHub actually returns for this repository's feed.
