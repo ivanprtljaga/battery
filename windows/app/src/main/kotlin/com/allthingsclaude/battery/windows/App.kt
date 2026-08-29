@@ -263,6 +263,13 @@ fun main(args: Array<String>) {
                 window.preferredSize = null
                 window.pack()
                 TrayAnchor.flyoutOrigin(window.size)?.let(window::setLocation)
+                // A flyout opened from the tray arrives without focus, and
+                // Windows spends the first click inside an unfocused window on
+                // activating it. That is correct for an app window and wrong
+                // here: the panel has one control, and clicking it once did
+                // nothing. Found by clicking it.
+                window.toFront()
+                window.requestFocus()
             }
 
             // Windows 11 rounds a framed window on its own and leaves an
