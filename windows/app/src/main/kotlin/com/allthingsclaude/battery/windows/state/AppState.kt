@@ -14,7 +14,7 @@ import com.allthingsclaude.battery.windows.auth.TokenCache
 import com.allthingsclaude.battery.windows.config.ClaudeConfigDir
 import com.allthingsclaude.battery.windows.config.ClaudeDir
 import com.allthingsclaude.battery.windows.config.DirOrigin
-import com.allthingsclaude.battery.windows.config.NotifyPreference
+import com.allthingsclaude.battery.windows.config.Flags
 import com.allthingsclaude.battery.windows.config.SourcePreference
 import com.allthingsclaude.battery.windows.history.DayUsage
 import com.allthingsclaude.battery.windows.history.LocalHistory
@@ -129,7 +129,17 @@ class AppState(
      * Held as state so the tray's tick follows it without re-reading a file on
      * every recomposition.
      */
-    var notifications by mutableStateOf(NotifyPreference.enabled())
+    var notifications by mutableStateOf(Flags.notifications.get())
+        private set
+
+    /**
+     * Whether the panel shows the seven-day chart and the project breakdown.
+     *
+     * Read here rather than in the panel because it decides more than a layout:
+     * with it off [loadHistory] does not run, so a collapsed section costs
+     * nothing rather than costing a read across 9P.
+     */
+    var details by mutableStateOf(Flags.details.get())
         private set
 
     /**
@@ -222,7 +232,19 @@ class AppState(
      */
     fun allowNotifications(enabled: Boolean) {
         notifications = enabled
-        NotifyPreference.set(enabled)
+        Flags.notifications.set(enabled)
+    }
+
+    /**
+     * Show or hide the local-history section, and remember it.
+     *
+     * Clears [stats] on the way down so that re-opening the panel with details
+     * off cannot draw a chart from figures nobody asked to have read.
+     */
+    fun showDetails(visible: Boolean) {
+        details = visible
+        Flags.details.set(visible)
+        if (!visible) stats = null
     }
 
     /**
@@ -234,6 +256,7 @@ class AppState(
      * should be — it reads megabytes across a network redirector.
      */
     fun loadHistory() {
+        if (!details) return
         val target = dir ?: return
         stats = runCatching { history(target) }.getOrNull()
     }

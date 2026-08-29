@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -29,6 +30,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.ui.text.TextStyle
 import com.allthingsclaude.battery.core.TimeFormatting
@@ -124,26 +127,63 @@ fun Panel(
                 }
             }
 
-            // Absent until the panel opens and reads it, and absent again when
-            // the distro is down — so the flyout is exactly as tall as what it
-            // has to say, which is what packing to content bought.
-            state.stats?.let {
-                Spacer(Modifier.height(18.dp))
-                LocalActivity(it)
-            }
+            // The heading is always here; what hangs under it is not. Absent
+            // until the panel opens and reads it, absent when the distro is
+            // down, and absent when the user has collapsed it — so the flyout is
+            // exactly as tall as what it has to say, which is what packing to
+            // content bought.
+            Spacer(Modifier.height(18.dp))
+            LocalActivity(
+                stats = state.stats,
+                expanded = state.details,
+                onToggle = { state.showDetails(!state.details) },
+            )
         }
     }
 }
 
-/** The seven-day chart and the project breakdown, under one heading. */
+/**
+ * The seven-day chart and the project breakdown, under a heading that collapses
+ * them.
+ *
+ * The port of macOS's `showDetails` switch, which gates the same content there.
+ * A clickable heading rather than a switch in the title bar: this panel has no
+ * other controls to sit beside one, and a caret on the section it opens says
+ * what it does without a caption explaining it.
+ */
 @Composable
-private fun LocalActivity(stats: LocalStats) {
+private fun LocalActivity(stats: LocalStats?, expanded: Boolean, onToggle: () -> Unit) {
     val palette = LocalBatteryPalette.current
 
     Divider()
-    Spacer(Modifier.height(14.dp))
-    Text("Last 7 days", color = palette.onSurface, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-    Spacer(Modifier.height(10.dp))
+    Spacer(Modifier.height(12.dp))
+
+    Row(
+        Modifier
+            .fillMaxWidth()
+            // No indication: this panel has no Material ripple to borrow, and a
+            // section heading that flashes on click would be the loudest thing
+            // on a surface whose whole job is to be glanced at.
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onToggle,
+            ),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "Last 7 days",
+            color = if (expanded) palette.onSurface else palette.secondary,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+        )
+        Spacer(Modifier.weight(1f))
+        Caret(expanded)
+    }
+
+    if (!expanded || stats == null) return
+
+    Spacer(Modifier.height(12.dp))
     DayChart(stats)
 
     if (stats.projects.isNotEmpty()) {
@@ -153,6 +193,26 @@ private fun LocalActivity(stats: LocalStats) {
             ProjectRow(project.name, project.tokens, project.tokens.toFloat() / busiest)
             Spacer(Modifier.height(6.dp))
         }
+    }
+}
+
+/** A chevron, pointing at what happens next rather than at the current state. */
+@Composable
+private fun Caret(expanded: Boolean) {
+    val palette = LocalBatteryPalette.current
+    Canvas(Modifier.size(width = 10.dp, height = 10.dp)) {
+        val stroke = Stroke(width = 1.5.dp.toPx(), cap = StrokeCap.Round)
+        val top = if (expanded) size.height * 0.65f else size.height * 0.35f
+        val point = if (expanded) size.height * 0.35f else size.height * 0.65f
+        drawPath(
+            path = androidx.compose.ui.graphics.Path().apply {
+                moveTo(0f, top)
+                lineTo(size.width / 2f, point)
+                lineTo(size.width, top)
+            },
+            color = palette.secondary,
+            style = stroke,
+        )
     }
 }
 

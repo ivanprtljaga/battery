@@ -253,11 +253,11 @@ fun main(args: Array<String>) {
             // Panel-gated, which on Windows is not a nicety. Reading the
             // transcripts means megabytes across 9P into a virtual machine, and
             // nobody needs a seven-day chart recomputed behind a closed window.
-            LaunchedEffect(visible, state.dir) {
+            LaunchedEffect(visible, state.dir, state.details) {
                 if (visible) withContext(Dispatchers.IO) { state.loadHistory() }
             }
 
-            LaunchedEffect(state.usage == null, state.message, state.stats, visible) {
+            LaunchedEffect(state.usage == null, state.message, state.stats, state.details, visible) {
                 if (!visible) return@LaunchedEffect
                 withFrameNanos { }
                 window.preferredSize = null
