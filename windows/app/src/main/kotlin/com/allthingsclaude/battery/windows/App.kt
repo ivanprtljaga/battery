@@ -29,6 +29,7 @@ import com.allthingsclaude.battery.windows.tray.TrayAnchor
 import com.allthingsclaude.battery.windows.tray.TrayIconRenderer
 import com.allthingsclaude.battery.windows.ui.BatteryTheme
 import com.allthingsclaude.battery.windows.ui.Panel
+import com.allthingsclaude.battery.windows.win.StartWithWindows
 import com.allthingsclaude.battery.windows.win.SystemTheme
 import com.allthingsclaude.battery.windows.win.TaskbarButton
 import com.allthingsclaude.battery.windows.win.WindowCorner
@@ -87,6 +88,11 @@ fun main(args: Array<String>) {
         // it, so following it live would mean a message-only window and a
         // subclass — a lot of Win32 for a setting people change twice a year.
         val dark = remember { SystemTheme.isDark() }
+
+        // Whether Windows launches this at login, read from the registry rather
+        // than remembered here: the user can turn it off in Task Manager's
+        // Startup tab, and this has to agree with what they see there.
+        var startsWithWindows by remember { mutableStateOf(StartWithWindows.enabled()) }
 
         // When focus loss last dismissed the panel.
         //
@@ -173,6 +179,20 @@ fun main(args: Array<String>) {
                         checked = state.notifications,
                         onCheckedChange = { state.allowNotifications(it) },
                     )
+                    // Absent rather than disabled when there is no exe to
+                    // register. Under Gradle the launcher is a JDK that could
+                    // not start this app on its own, and a switch that writes a
+                    // Run entry failing silently at every login is worse than no
+                    // switch.
+                    if (StartWithWindows.launchTarget() != null) {
+                        CheckboxItem(
+                            text = "Start with Windows",
+                            checked = startsWithWindows,
+                            onCheckedChange = { wanted ->
+                                if (StartWithWindows.set(wanted)) startsWithWindows = wanted
+                            },
+                        )
+                    }
                     Separator()
                     Item("Quit", onClick = ::exitApplication)
                 },
