@@ -29,6 +29,7 @@ import com.allthingsclaude.battery.windows.tray.TrayAnchor
 import com.allthingsclaude.battery.windows.tray.TrayIconRenderer
 import com.allthingsclaude.battery.windows.ui.BatteryTheme
 import com.allthingsclaude.battery.windows.ui.Panel
+import com.allthingsclaude.battery.windows.win.SystemTheme
 import com.allthingsclaude.battery.windows.win.TaskbarButton
 import com.allthingsclaude.battery.windows.win.WindowCorner
 import kotlinx.coroutines.Dispatchers
@@ -81,6 +82,11 @@ fun main(args: Array<String>) {
             AppState(notify = { Toaster.show(it) }).also { it.resolve(explicit) }
         }
         var visible by remember { mutableStateOf(startVisible) }
+
+        // Read once. Windows broadcasts a theme change and AWT does not forward
+        // it, so following it live would mean a message-only window and a
+        // subclass — a lot of Win32 for a setting people change twice a year.
+        val dark = remember { SystemTheme.isDark() }
 
         // When focus loss last dismissed the panel.
         //
@@ -241,7 +247,7 @@ fun main(args: Array<String>) {
             resizable = false,
             alwaysOnTop = trayAvailable,
         ) {
-            BatteryTheme {
+            BatteryTheme(dark = dark) {
                 // Square, and filling the window edge to edge. Rounding the
                 // panel inside an opaque square window is what left white
                 // wedges in the corners: a clip paints a shape, it does not
