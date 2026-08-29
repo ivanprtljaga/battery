@@ -694,29 +694,60 @@ Home Screen widgets — is deliberately **not** in this list. It needs MSIX and 
 COM server, and it is the one surface where a C#/WinUI port would have been
 easier; deferring it is part of what keeps Compose Desktop the right call.
 
+### Following the account, not just the directory
+
+Two facts collided once a second account became plausible. Rule two holds the
+credential in memory until it expires, and the identity was read once at
+startup — so signing Claude Code into a different account *in the same
+directory* changed nothing this app could see. The old token stayed valid for
+about eight hours, so it would report the previous account's usage all
+afternoon, then silently start reporting the new account's numbers under the old
+account's name.
+
+The fix is the distinction between reading a file and looking at one. Rule two
+forbids the read: it is expensive, and on a stopped distro it boots a VM. A
+`stat` is neither, and it is gated by `Wsl.reachable` like every other path
+access here. So both files — the credential and `.claude.json` — are stamped on
+each poll and re-read only when they move.
+
+Zero is "cannot look", never "changed". A distro going down must leave the
+gauges standing, which is the case `TokenCache` was built for in the first
+place, and treating an unreachable path as a change would have broken it.
+
+The same read now also carries the plan. `organizationRateLimitTier` is sitting
+in `.claude.json`, which the README noted as a free local signal a phase ago; the
+badge costs no request and has no failure mode, and the *label* stays `core`'s
+because `default_claude_max_20x` contains "max" and a naive check calls a 20x
+plan "Max".
+
 ## What this port does not have
 
 The macOS app is the reference and this is not all of it. Written down as a list
 rather than discovered one disappointment at a time.
 
-**Accounts.** macOS has `Account`, `AccountManager`, `OAuthService` and an
-account-tab strip: several accounts, each with its own tokens, added by signing
-in to Battery itself over OAuth PKCE. None of that is here, and the omission is
-structural rather than unfinished. This app is a **bridge**: it reads Claude
-Code's credential and never holds one of its own, because the refresh token is
-deliberately withheld and rotating a single-use chain shared with another program
-strands whichever copy loses. Adding a Battery-owned account means adding the
-token store that `UsagePoller` is written to avoid.
+**Several accounts at once.** macOS has `Account`, `AccountManager`,
+`OAuthService` and an account-tab strip: several accounts side by side, each with
+its own tokens, added by signing in to Battery itself over OAuth PKCE. That is
+not here, and the omission is structural rather than unfinished. This app is a
+**bridge**: it reads Claude Code's credential and never holds one of its own,
+because the refresh token is deliberately withheld and rotating a single-use
+chain shared with another program strands whichever copy loses. A
+Battery-managed account means building the token store `UsagePoller` was written
+to avoid.
 
-What exists instead is a *source* switch — native or WSL — and it doubles as
-account switching exactly when the two installs are signed in as different
-people, because the identity comes from each directory's own `.claude.json`.
-Signed into the same account on both, as is usual, switching source changes the
-five-hour window and not the account.
+Switching *between* accounts does work, by two different routes, because both
+are really "which directory". Two installs signed in as different people are two
+entries in the `Source` menu, since the identity comes from each directory's own
+`.claude.json`. And signing one install into a different account in place is
+picked up on the next poll — see the note on stamps above; before that fix it was
+not, which is the more interesting half.
 
-**A settings window.** macOS has `SettingsView` and about ten preferences. This
-app has two tick boxes in the tray menu and a collapsible section. Specifically
-missing:
+What is missing is only seeing both at the same time. Two accounts means two
+tokens, two five-hour windows and two sets of gauges, and this panel draws one.
+
+**Most of macOS's settings.** It has `SettingsView` and about ten preferences.
+This app has two tick boxes in the tray menu and a collapsible section.
+Specifically missing:
 
 | macOS setting | here |
 |:--|:--|
@@ -727,6 +758,7 @@ missing:
 | `pollIntervalActive` / `pollIntervalIdle` | absent — a fixed sixty seconds, and `PollBackoff` on failure. There is no idle cadence, so the app polls at the same rate whether or not anybody is working. |
 | `launchAtLogin` | absent, and the most visible of these: after a reboot the app is not running until it is started from the Start Menu. |
 | `dataRetentionDays` | not applicable — see below. |
+| `launchAtLogin` is the one worth having | the rest are parity for its own sake. |
 
 **A database.** macOS has `DatabaseService` and keeps snapshots across launches.
 This app uses `InMemorySnapshotStore`, so the burn-rate projection — the
@@ -738,14 +770,10 @@ anything this app stores, so the gap is narrower than it sounds.
 **The streak and the heat map.** `StatsView` on macOS. Deliberately not built —
 neither answers a question this panel is opened to ask.
 
-**A plan-tier badge.** macOS shows Max/Pro beside the title. `ProfileApi` in
-`core` can supply it and nothing here calls it. Worth noting that Windows'
-`.claude.json` carries `userRateLimitTier` and friends locally, so this is
-cheaper here than on macOS.
-
-**Closing on focus loss.** The flyout stays up until it is clicked away from the
-tray icon or closed. Windows' own flyouts dismiss when they lose focus, which
-this now has the focus handling to support and does not do.
+**A settings window.** Not planned. Four switches live in the tray menu and one
+is the section heading itself; a window to hold them would be more chrome than
+setting. If the list above ever grows past what a menu can carry, that is the
+point to reconsider — not before.
 
 ## Unverified
 
