@@ -66,6 +66,14 @@ class AppState(
     private val runningDistros: () -> List<String> = { Wsl.running() },
     private val candidates: () -> List<ClaudeDir> = { ClaudeConfigDir.candidates() },
     private val preferenceFile: File = SourcePreference.defaultFile(),
+    /**
+     * When the config file last changed, or 0 when it must not be looked at.
+     * The identity's half of noticing an account switch; see [TokenCache] for
+     * the credential's.
+     */
+    private val configStamp: (ClaudeDir) -> Long = {
+        ClaudeConfigDir.stampOf(it, ClaudeConfigDir.configFile(it.path))
+    },
     private val history: (ClaudeDir) -> LocalStats? = { LocalHistory.read(it) },
     private val alerts: ThresholdAlerts = ThresholdAlerts(),
     /**
@@ -95,6 +103,9 @@ class AppState(
         private set
     var identity by mutableStateOf<String?>(null)
         private set
+
+    /** What [configStamp] said when [identity] was last read. */
+    private var identityStamp = 0L
     var healthy by mutableStateOf(false)
         private set
     var lastUpdated by mutableStateOf<Instant?>(null)
@@ -194,7 +205,7 @@ class AppState(
                 // one that can answer. See DirSelection.
                 ?: DirSelection.pick(sources)
         }
-        identity = dir?.let { readIdentity(it) }
+        dir?.let { identityStamp = configStamp(it); applyIdentity(it) }
         if (dir == null) message = "No Claude Code directory found"
     }
 
@@ -214,7 +225,8 @@ class AppState(
     fun select(source: ClaudeDir) {
         SourcePreference.save(source, preferenceFile)
         dir = source
-        identity = readIdentity(source)
+        identityStamp = configStamp(source)
+        applyIdentity(source)
         usage = null
         stats = null
         message = null
@@ -271,12 +283,28 @@ class AppState(
         sources = runCatching { candidates() }.getOrDefault(emptyList())
     }
 
-    private fun readIdentity(dir: ClaudeDir): String? =
-        runCatching {
+    /**
+     * Re-read who this directory belongs to, but only when the file has moved.
+     *
+     * Without this the header is whatever was read at startup, for ever. Signing
+     * Claude Code into a different account inside WSL changes both files; the
+     * credential is caught by [TokenCache] and the name and plan are caught
+     * here, so the two cannot disagree about which account is on screen.
+     */
+    private fun refreshIdentity(target: ClaudeDir) {
+        val stamp = configStamp(target)
+        if (stamp == 0L || stamp == identityStamp) return
+        identityStamp = stamp
+        applyIdentity(target)
+    }
+
+    private fun applyIdentity(dir: ClaudeDir) {
+        val account = runCatching {
             File(ClaudeConfigDir.onThisPlatform(ClaudeConfigDir.configFile(dir.path))).readText()
-        }.getOrNull()
-            ?.let { ClaudeConfigDir.identity(it) }
-            ?.let { it.email ?: it.accountUuid }
+        }.getOrNull()?.let { ClaudeConfigDir.identity(it) }
+
+        identity = account?.let { it.email ?: it.accountUuid }
+    }
 
     companion object {
         /**
@@ -324,6 +352,7 @@ class AppState(
     fun refresh() {
         refreshSources()
         val target = dir ?: return
+        refreshIdentity(target)
         when (val result = poll(target)) {
             is PollResult.Ok -> {
                 val response = result.usage

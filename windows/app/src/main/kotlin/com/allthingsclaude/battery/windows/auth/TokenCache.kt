@@ -2,6 +2,7 @@ package com.allthingsclaude.battery.windows.auth
 
 import com.allthingsclaude.battery.core.AppConfig
 import com.allthingsclaude.battery.core.StoredTokens
+import com.allthingsclaude.battery.windows.config.ClaudeConfigDir
 import com.allthingsclaude.battery.windows.config.ClaudeDir
 import java.time.Instant
 
@@ -24,9 +25,23 @@ import java.time.Instant
  */
 class TokenCache(
     private val read: (ClaudeDir) -> CredentialLookup = { CredentialBridge.read(it) },
+    /**
+     * When the credential file last changed, or 0 when it must not be looked at.
+     *
+     * The cheap half of rule two. Holding a token until it expires is right when
+     * the file has not moved, and wrong the moment somebody signs Claude Code
+     * into a different account: the old token stays valid for hours, so Battery
+     * would go on reporting the previous account's usage while the panel showed
+     * whatever it read at startup. A `stat` is not a read — it costs
+     * milliseconds and it is gated like everything else here.
+     */
+    private val stamp: (ClaudeDir) -> Long = {
+        ClaudeConfigDir.stampOf(it, ClaudeConfigDir.credentialsFile(it.path))
+    },
 ) {
     private var cached: StoredTokens? = null
     private var cachedFor: String? = null
+    private var cachedStamp: Long = 0
 
     /** What the last file read said, for surfacing a reason without re-reading. */
     var lastLookup: CredentialLookup? = null
@@ -43,7 +58,12 @@ class TokenCache(
      */
     fun tokens(dir: ClaudeDir, now: Instant = Instant.now()): CredentialLookup {
         val current = cached
-        if (current != null && cachedFor == dir.path && !current.isExpiringSoon(now)) {
+        val now0 = stamp(dir)
+        // Zero is "no answer", not "changed". A distro that has gone down must
+        // not read as an account switch — that is the case this whole cache
+        // exists to serve.
+        val moved = now0 != 0L && now0 != cachedStamp
+        if (current != null && cachedFor == dir.path && !moved && !current.isExpiringSoon(now)) {
             return CredentialLookup.Available(current)
         }
         val lookup = read(dir)
@@ -51,12 +71,14 @@ class TokenCache(
         if (lookup is CredentialLookup.Available) {
             cached = lookup.tokens
             cachedFor = dir.path
+            cachedStamp = now0
         } else if (cachedFor != dir.path) {
             // Only drop a cached token when the question was about a different
             // directory. An unreadable file for the *same* directory leaves the
             // old token in place: it may still have hours left on it.
             cached = null
             cachedFor = null
+            cachedStamp = 0
         }
         return lookup
     }
@@ -70,6 +92,7 @@ class TokenCache(
     fun clear() {
         cached = null
         cachedFor = null
+        cachedStamp = 0
         lastLookup = null
     }
 }
