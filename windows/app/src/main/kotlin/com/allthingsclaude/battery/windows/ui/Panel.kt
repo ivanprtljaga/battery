@@ -48,6 +48,7 @@ import java.time.format.FormatStyle
 import java.time.format.TextStyle as DayNameStyle
 import java.time.temporal.ChronoUnit
 import java.util.Locale
+import kotlin.math.roundToInt
 
 /**
  * The one text primitive this panel uses.
@@ -112,7 +113,7 @@ fun Panel(
             if (usage == null) {
                 Empty(state)
             } else {
-                Gauges(usage)
+                Gauges(usage, state.remaining)
                 usage.projection?.let {
                     Spacer(Modifier.height(16.dp))
                     Text(
@@ -384,23 +385,40 @@ private fun Empty(state: AppState) {
 }
 
 @Composable
-private fun Gauges(usage: UiUsage) {
+private fun Gauges(usage: UiUsage, remaining: Boolean) {
     Row(
         Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(18.dp),
     ) {
-        usage.session?.let { Gauge("Session", it, Modifier.weight(1f)) }
-        Gauge("Week", usage.weekly, Modifier.weight(1f))
-        usage.scoped?.let { Gauge(usage.scopedLabel ?: "Model", it, Modifier.weight(1f)) }
+        usage.session?.let { Gauge("Session", it, remaining, Modifier.weight(1f)) }
+        Gauge("Week", usage.weekly, remaining, Modifier.weight(1f))
+        usage.scoped?.let {
+            Gauge(usage.scopedLabel ?: "Model", it, remaining, Modifier.weight(1f))
+        }
     }
 }
 
-/** One ring. Port of `SessionGaugeView` / `WeeklyGaugeView`. */
+/**
+ * One ring. Port of `SessionGaugeView` / `WeeklyGaugeView`.
+ *
+ * With [remaining] the arc *empties* as the window is spent rather than filling,
+ * and the number counts down with it. Both together or neither: a ring that
+ * fills while its number falls would be unreadable, and the depleting ring is
+ * what makes "37" legible as "left" without a word saying so.
+ */
 @Composable
-private fun Gauge(label: String, bucket: UsageBucket, modifier: Modifier = Modifier) {
+private fun Gauge(
+    label: String,
+    bucket: UsageBucket,
+    remaining: Boolean,
+    modifier: Modifier = Modifier,
+) {
     val palette = LocalBatteryPalette.current
+    // Colour follows what has been used whichever way the number reads: 8% left
+    // is alarming and 8% used is not.
     val level = UsageLevel.from(bucket.utilization)
     val color = Color(level.color)
+    val shown = if (remaining) 100.0 - bucket.utilization else bucket.utilization
 
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Box(contentAlignment = Alignment.Center) {
@@ -417,13 +435,13 @@ private fun Gauge(label: String, bucket: UsageBucket, modifier: Modifier = Modif
                     size = arcSize,
                     style = Stroke(width = stroke, cap = StrokeCap.Round),
                 )
-                if (bucket.utilization > 0) {
+                if (shown > 0) {
                     drawArc(
                         color = color,
                         // -90 puts zero at twelve o'clock; the sweep runs
                         // clockwise, matching every other Battery surface.
                         startAngle = -90f,
-                        sweepAngle = (bucket.utilization.coerceIn(0.0, 100.0) / 100.0 * 360.0).toFloat(),
+                        sweepAngle = (shown.coerceIn(0.0, 100.0) / 100.0 * 360.0).toFloat(),
                         useCenter = false,
                         topLeft = offset,
                         size = arcSize,
@@ -432,7 +450,7 @@ private fun Gauge(label: String, bucket: UsageBucket, modifier: Modifier = Modif
                 }
             }
             Text(
-                "${bucket.utilization.toInt()}%",
+                "${shown.roundToInt()}%",
                 color = palette.onSurface,
                 fontSize = 17.sp,
                 fontWeight = FontWeight.SemiBold,

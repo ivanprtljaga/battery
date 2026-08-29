@@ -134,12 +134,20 @@ fun main(args: Array<String>) {
                             // Windows stretch it is precisely the muddiness
                             // TrayIconRenderer draws per-size to avoid.
                             size = trayIconSize(),
-                            mode = TrayIconRenderer.Mode.RING_WITH_PERCENT,
+                            mode = state.trayMode,
                             stale = state.stale,
+                            remaining = state.remaining,
                         )
                         .toComposeImageBitmap(),
                 ),
-                tooltip = state.usage?.let { "Battery — ${it.headline.toInt()}%" } ?: "Battery",
+                tooltip = state.usage?.let {
+                    val shown = if (state.remaining) 100.0 - it.headline else it.headline
+                    val what = if (state.remaining) "left" else "used"
+                    // The tooltip has room for the word the icon does not, so it
+                    // is the one place the two readings are named rather than
+                    // inferred from a depleting ring.
+                    "Battery — ${shown.roundToInt()}% $what"
+                } ?: "Battery",
                 onAction = { if (!singleClickWorks) visible = !visible },
                 menu = {
                     Item("Show", onClick = { visible = true })
@@ -179,6 +187,27 @@ fun main(args: Array<String>) {
                                 },
                             )
                         }
+                    }
+                    // What the icon draws. Windows gives a tray icon one small
+                    // square and nothing else — no width, no text beside it — so
+                    // the three ways to fill that square are a real choice
+                    // rather than a cosmetic one.
+                    Menu("Display") {
+                        TrayIconRenderer.Mode.entries.forEach { mode ->
+                            CheckboxItem(
+                                text = mode.menuLabel,
+                                checked = state.trayMode == mode,
+                                onCheckedChange = { wanted ->
+                                    if (wanted) state.chooseTrayMode(mode)
+                                },
+                            )
+                        }
+                        Separator()
+                        CheckboxItem(
+                            text = "Count down instead of up",
+                            checked = state.remaining,
+                            onCheckedChange = { state.showRemaining(it) },
+                        )
                     }
                     CheckboxItem(
                         text = "Notify at 80/90/95%",

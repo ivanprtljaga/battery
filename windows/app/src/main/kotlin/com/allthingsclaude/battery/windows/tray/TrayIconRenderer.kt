@@ -8,6 +8,7 @@ import java.awt.Font
 import java.awt.RenderingHints
 import java.awt.geom.Arc2D
 import java.awt.image.BufferedImage
+import kotlin.math.roundToInt
 
 /**
  * The tray icon, drawn.
@@ -44,6 +45,19 @@ object TrayIconRenderer {
          * the whole box instead of the hole in the middle of a ring.
          */
         PERCENT,
+        ;
+
+        /**
+         * How the tray menu names this. Plain English rather than the enum's
+         * name, because the menu is read by somebody choosing, not by a
+         * programmer reading a switch.
+         */
+        val menuLabel: String
+            get() = when (this) {
+                RING -> "Ring only"
+                RING_WITH_PERCENT -> "Ring with number"
+                PERCENT -> "Number only"
+            }
     }
 
     /**
@@ -74,11 +88,20 @@ object TrayIconRenderer {
      *   it is no longer being refreshed (the distro went away, the network is
      *   down). Saying nothing at all would let a stale number read as current.
      */
+    /**
+     * @param utilization 0–100, always *used* — it decides the colour and the
+     *   severity whichever way round the number is shown.
+     * @param remaining draw and label what is left rather than what is spent.
+     *   The arc depletes instead of filling, which is the whole point: a ring
+     *   emptying as a window is consumed reads as a battery, and a number
+     *   without that would be ambiguous between the two readings.
+     */
     fun render(
         utilization: Double,
         size: Int = 16,
         mode: Mode = Mode.RING,
         stale: Boolean = false,
+        remaining: Boolean = false,
     ): BufferedImage {
         val image = BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB)
         val g = image.createGraphics()
@@ -86,15 +109,19 @@ object TrayIconRenderer {
         g.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE)
         g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
 
+        // The colour follows what has been *used* no matter which number is on
+        // screen: 8% left is alarming and 8% used is not, and the icon must not
+        // say otherwise.
         val level = UsageLevel.from(utilization)
         val color = Color(level.color, true)
+        val shown = if (remaining) 100.0 - utilization else utilization
 
         when (mode) {
-            Mode.PERCENT -> drawPercent(g, size, utilization, color)
-            Mode.RING -> drawRing(g, size, utilization, color, stale)
+            Mode.PERCENT -> drawPercent(g, size, shown, color)
+            Mode.RING -> drawRing(g, size, shown, color, stale)
             Mode.RING_WITH_PERCENT -> {
-                drawRing(g, size, utilization, color, stale)
-                if (size >= PERCENT_THRESHOLD) drawPercent(g, size, utilization, color, inset = true)
+                drawRing(g, size, shown, color, stale)
+                if (size >= PERCENT_THRESHOLD) drawPercent(g, size, shown, color, inset = true)
             }
         }
 
@@ -139,11 +166,18 @@ object TrayIconRenderer {
         color: Color,
         inset: Boolean = false,
     ) {
-        // 100 would not fit, and "100" on a full gauge is the least surprising
-        // number in the world — so it degrades to "99" territory by clamping the
-        // label rather than shrinking the font for one edge case.
-        val text = utilization.coerceIn(0.0, 99.0).toInt().toString()
-        val fraction = if (inset) 0.42f else 0.72f
+        // Three digits, drawn narrower rather than clamped away. This used to
+        // read "99" at a hundred percent, on the argument that the number was
+        // unsurprising and would not fit — true while the number was decoration
+        // beside a ring, and a lie once PERCENT became the default and the
+        // number is the whole icon.
+        val text = utilization.coerceIn(0.0, 100.0).roundToInt().toString()
+        val wide = text.length >= 3
+        val fraction = when {
+            inset -> 0.42f
+            wide -> 0.50f
+            else -> 0.72f
+        }
         g.font = Font(Font.SANS_SERIF, Font.BOLD, (size * fraction).toInt().coerceAtLeast(6))
         g.color = color
         val metrics = g.fontMetrics

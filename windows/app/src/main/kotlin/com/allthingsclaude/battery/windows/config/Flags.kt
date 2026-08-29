@@ -40,6 +40,46 @@ object Flags {
      */
     val details = Flag("windows-details", default = true)
 
+    /**
+     * Whether the numbers say what is left rather than what is spent.
+     *
+     * macOS's `showPercentageRemaining`. Off by default, matching every other
+     * surface: the API reports utilisation, and "63%" meaning "used" is the
+     * reading the panel has always had.
+     */
+    val remaining = Flag("windows-remaining", default = false)
+
+    /**
+     * Which of [com.allthingsclaude.battery.windows.tray.TrayIconRenderer.Mode]
+     * the tray icon draws.
+     *
+     * Stored by name rather than by ordinal: an ordinal is a number whose
+     * meaning lives in the order of an enum somebody will reorder.
+     */
+    val trayMode = Choice("windows-tray-mode")
+
+    /**
+     * One name out of a set, remembered.
+     *
+     * Returns null rather than a default, because the default belongs to the
+     * enum that owns the choice and not to the file that stores it.
+     */
+    class Choice(private val fileName: String) {
+
+        private fun file(): File = File(System.getProperty("user.home"), ".battery/$fileName")
+
+        fun get(): String? = runCatching { file().readText().trim().takeIf { it.isNotEmpty() } }
+            .getOrNull()
+
+        fun set(value: String) {
+            runCatching {
+                val target = file()
+                target.parentFile?.mkdirs()
+                target.writeText(value)
+            }
+        }
+    }
+
     class Flag(private val fileName: String, private val default: Boolean) {
 
         private fun file(): File = File(System.getProperty("user.home"), ".battery/$fileName")

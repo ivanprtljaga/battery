@@ -26,6 +26,7 @@ import com.allthingsclaude.battery.windows.notify.Alert
 import com.allthingsclaude.battery.windows.notify.ThresholdAlerts
 import com.allthingsclaude.battery.windows.poll.PollResult
 import com.allthingsclaude.battery.windows.poll.UsagePoller
+import com.allthingsclaude.battery.windows.tray.TrayIconRenderer
 import com.allthingsclaude.battery.windows.wsl.Wsl
 import java.io.File
 import java.time.Instant
@@ -185,6 +186,30 @@ class AppState(
         private set
 
     /**
+     * Whether every percentage in the app counts down rather than up.
+     *
+     * One switch for the panel, the icon and the tooltip together. Showing
+     * "used" in one place and "left" in another would be worse than either.
+     */
+    var remaining by mutableStateOf(Flags.remaining.get())
+        private set
+
+    /**
+     * What the tray icon draws.
+     *
+     * PERCENT by default: the mode measured back in Phase 2 as the only one
+     * carrying a readable number at 16 px, because the digits get the whole cell
+     * instead of the hole in the middle of a ring. Windows gives a tray icon one
+     * small square and nothing else, so the loudest option is the useful one.
+     */
+    var trayMode by mutableStateOf(
+        Flags.trayMode.get()
+            ?.let { name -> TrayIconRenderer.Mode.entries.firstOrNull { it.name == name } }
+            ?: TrayIconRenderer.Mode.PERCENT,
+    )
+        private set
+
+    /**
      * The seven-day chart and the project breakdown, or null when they have not
      * been read — which is the state behind a closed panel, and the state when
      * the distro is down.
@@ -265,6 +290,24 @@ class AppState(
         lastUpdated = null
         refresh()
         loadHistory()
+    }
+
+    /** Count down rather than up, everywhere at once. */
+    fun showRemaining(on: Boolean) {
+        remaining = on
+        Flags.remaining.set(on)
+    }
+
+    /**
+     * Choose what the tray icon draws.
+     *
+     * Not `setTrayMode`, for the same reason `allowNotifications` is not
+     * `setNotifications`: Kotlin already generates that signature for the
+     * property's own private setter.
+     */
+    fun chooseTrayMode(mode: TrayIconRenderer.Mode) {
+        trayMode = mode
+        Flags.trayMode.set(mode.name)
     }
 
     /**
