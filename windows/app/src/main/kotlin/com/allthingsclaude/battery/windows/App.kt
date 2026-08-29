@@ -6,6 +6,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.graphics.painter.BitmapPainter
@@ -27,6 +28,7 @@ import com.allthingsclaude.battery.windows.notify.Toaster
 import com.allthingsclaude.battery.windows.state.AppState
 import com.allthingsclaude.battery.windows.tray.TrayAnchor
 import com.allthingsclaude.battery.windows.tray.TrayIconRenderer
+import com.allthingsclaude.battery.windows.tray.TrayMenuStyle
 import com.allthingsclaude.battery.windows.ui.BatteryTheme
 import com.allthingsclaude.battery.windows.ui.Panel
 import com.allthingsclaude.battery.windows.win.StartWithWindows
@@ -199,6 +201,12 @@ fun main(args: Array<String>) {
                     }
                     Separator()
                     Item("Quit", onClick = ::exitApplication)
+
+                    // After the items, and on every recomposition. Compose
+                    // rebuilds them as the source list and the tick states
+                    // change, and an item created after a one-off restyle would
+                    // come back at the peer's default size.
+                    SideEffect { TrayMenuStyle.apply() }
                 },
             )
 

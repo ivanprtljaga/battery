@@ -802,6 +802,22 @@ anything this app stores, so the gap is narrower than it sounds.
 **The streak and the heat map.** `StatsView` on macOS. Deliberately not built —
 neither answers a question this panel is opened to ask.
 
+**AWT does not scale a menu for DPI either.** The same finding as the tray
+icon, in the same shape, found the same way — by looking at it. `win.menu.font`
+reports `Segoe UI 12`, the 96-DPI pixel size of the system's 9 pt menu font, and
+AWT then draws it at 12 *physical* pixels: on a 150% display the app's context
+menu came out two thirds the size of every other menu on the machine, and would
+have come out half at 200%. Multiplying by the screen's scale factor is the
+correction `trayIconSize` already makes, and the result matches a native menu
+rather than merely being larger.
+
+Re-applied on every recomposition, because Compose rebuilds the items as the
+source list and the tick states change and a new item arrives at the peer's
+default size. Item height follows the font, which is where the vertical
+breathing room comes from; horizontal padding is not adjustable — `MenuItem` has
+no insets and the peer draws with the shell's margins. More than that would mean
+not using an AWT menu at all.
+
 **A settings window.** Not planned. Four switches live in the tray menu and one
 is the section heading itself; a window to hold them would be more chrome than
 setting. If the list above ever grows past what a menu can carry, that is the
