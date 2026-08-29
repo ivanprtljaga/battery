@@ -784,10 +784,10 @@ the tray menu. Specifically missing:
 | macOS setting | here |
 |:--|:--|
 | `colorTheme` | **done, without the setting.** The panel follows `AppsUseLightTheme` — Windows' own "default app mode" — read once at start. Not `SystemUsesLightTheme`, which is the taskbar and Start, and which is why one can be dark while the other is light. |
-| `menuBarDisplayMode`, `showMenuBarText` | absent. `TrayIconRenderer.Mode` draws all three, and the app hardcodes `RING_WITH_PERCENT`. |
-| `showPercentageRemaining` | absent — always used, never remaining. |
+| `menuBarDisplayMode` | **done**, as a `Display` submenu over the three modes `TrayIconRenderer` already drew. `showMenuBarText` has no meaning here — see below. |
+| `showPercentageRemaining` | **done.** One switch turns the panel, the icon and the tooltip around together; the arc empties rather than fills, because a ring filling while its number falls would be unreadable. |
 | `showTimeSinceReset` | absent — always time until reset, never elapsed. |
-| `pollIntervalActive` / `pollIntervalIdle` | absent — a fixed sixty seconds, and `PollBackoff` on failure. There is no idle cadence, so the app polls at the same rate whether or not anybody is working. |
+| `pollIntervalActive` / `pollIntervalIdle` | **done**, from a different signal. `sessionActive` is the obvious one and is wrong: it comes from the transcripts, which are read when the panel opens, so behind a closed window it would call a working user idle. The figure itself is the proxy — three identical readings, then 60s stepping to 300s, snapping back on any change. |
 | `launchAtLogin` | **done.** `HKCU\...\CurrentVersion\Run`, which is per-user like the installer, needs no administrator, and is what Task Manager's Startup tab reads — so turning it off there is seen here, because the state is queried rather than remembered. Never verified across an actual reboot. |
 | `dataRetentionDays` | not applicable — see below. |
 
@@ -798,6 +798,22 @@ This app uses `InMemorySnapshotStore`, so the burn-rate projection — the
 before it says anything. Nothing else depends on history surviving a restart, and
 the seven-day chart is read from Claude Code's transcripts rather than from
 anything this app stores, so the gap is narrower than it sounds.
+
+**A wide tray icon.** macOS puts a horizontal battery glyph and a number side
+by side in the menu bar, which is far more readable than anything that fits in a
+square. Windows has no equivalent and cannot be given one: the notification area
+is a single square cell, and a 48×24 image is crushed into it whether
+`setImageAutoSize` is on or off — tried both, on a real taskbar.
+
+What is left is the choice of what to draw *inside* the square, which is the
+`Display` submenu. `PERCENT` is the default because Phase 2 measured it as the
+only mode carrying a readable number at 16 px: the digits get the whole cell
+instead of the hole in the middle of a ring.
+
+That default also exposed a lie the renderer carried. It drew "99" at a hundred
+percent, on the argument that three digits would not fit and the number was
+unsurprising — true while the number was decoration beside a ring, false the
+moment it became the whole icon.
 
 **The streak and the heat map.** `StatsView` on macOS. Deliberately not built —
 neither answers a question this panel is opened to ask.
@@ -838,12 +854,11 @@ point to reconsider — not before.
 
 Written down rather than discovered later:
 
-- **Nothing runs these tests on a push.** `ci.yml` is the macOS build and
-  `android-ci.yml` the Android one; neither looks at `windows/`, and the only
-  workflow that runs `gradlew test` here is the release, on a `windows-v*` tag.
-  So 120 tests currently guard a release and nothing else — a broken commit
-  stays green until somebody cuts a version. A `windows-ci.yml` on push and pull
-  request is the obvious fix and is not written.
+- **`windows-ci.yml` has never run either.** It is written now — tests and
+  `createDistributable`, on push and pull request, feature branches included —
+  but like the release workflow it has not met a real runner. The steps most
+  likely to be wrong are the same ones: whether `windows-latest` resolves the
+  borrowed `core` from a clean checkout.
 - **`windows-release.yml` has never run.** No `windows-v*` tag exists, so the
   workflow is reasoned from `android-release.yml` and from a packaging run on one
   machine. The steps most likely to be wrong are the ones a local build cannot
